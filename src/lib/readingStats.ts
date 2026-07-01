@@ -1,5 +1,5 @@
-// Local, per-book reading intelligence — open counts, time spent, progress, and
-// last-opened — persisted in localStorage so it survives reloads without a backend.
+// Local, per-book reading intelligence — open counts, time spent, progress,
+// and last-opened — persisted in localStorage.
 
 export interface BookStat {
   opens: number;
@@ -10,7 +10,11 @@ export interface BookStat {
 
 type StatMap = Record<string, BookStat>;
 
-const KEY = "bookform.reading-stats.v1";
+const KEY = "quire.stats.v1";
+const LEGACY_KEY = "bookform.reading-stats.v1";
+
+// Guards against React StrictMode double-running the open effect.
+const lastOpen = new Map<string, number>();
 
 function emptyStat(): BookStat {
   return { opens: 0, secondsRead: 0, lastOpenedAt: 0, progress: 0 };
@@ -18,10 +22,23 @@ function emptyStat(): BookStat {
 
 export function loadStats(): StatMap {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY) || migrateLegacy();
     return raw ? (JSON.parse(raw) as StatMap) : {};
   } catch {
     return {};
+  }
+}
+
+function migrateLegacy(): string | null {
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      localStorage.setItem(KEY, legacy);
+      localStorage.removeItem(LEGACY_KEY);
+    }
+    return legacy;
+  } catch {
+    return null;
   }
 }
 
@@ -38,9 +55,14 @@ export function getStat(map: StatMap, id: string): BookStat {
 }
 
 export function recordOpen(id: string): StatMap {
+  const now = Date.now();
+  const last = lastOpen.get(id) || 0;
+  if (now - last < 30_000) return loadStats();
+  lastOpen.set(id, now);
+
   const map = loadStats();
   const stat = getStat(map, id);
-  map[id] = { ...stat, opens: stat.opens + 1, lastOpenedAt: Date.now() };
+  map[id] = { ...stat, opens: stat.opens + 1, lastOpenedAt: now };
   persist(map);
   return map;
 }
@@ -61,6 +83,14 @@ export function setProgress(id: string, progress: number): StatMap {
   // Only bump when meaningfully changed to avoid write churn.
   if (Math.abs(clamped - stat.progress) < 0.01) return map;
   map[id] = { ...stat, progress: clamped };
+  persist(map);
+  return map;
+}
+
+export function removeStats(id: string): StatMap {
+  const map = loadStats();
+  if (!(id in map)) return map;
+  delete map[id];
   persist(map);
   return map;
 }

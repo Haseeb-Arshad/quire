@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { Loader2, Maximize2, Minus, Plus, X } from "lucide-react";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+import { pdfjsLib, type PDFDocumentProxy, type RenderTask } from "./lib/pdf";
 
 export function PdfPageView({ bookId, fileUrl }: { bookId: string; fileUrl: string }) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
@@ -106,7 +102,7 @@ function PdfPage({
   useEffect(() => {
     if (!visible || rendered) return;
     let cancelled = false;
-    let task: pdfjsLib.RenderTask | null = null;
+    let task: RenderTask | null = null;
 
     (async () => {
       const page = await doc.getPage(pageNumber);
@@ -186,7 +182,7 @@ function PdfLightbox({
 
   useEffect(() => {
     let cancelled = false;
-    let task: pdfjsLib.RenderTask | null = null;
+    let task: RenderTask | null = null;
     (async () => {
       const page = await doc.getPage(pageNumber);
       const canvas = canvasRef.current;

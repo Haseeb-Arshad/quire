@@ -21,9 +21,9 @@ import {
   Upload,
   Wand2
 } from "lucide-react";
-import { createDemoBook, getBook, getBooks, uploadBook } from "./api";
-import type { BookDocument, BookSummary } from "./types";
-import { DEFAULT_FONT_ID, fontStack, READING_FONTS } from "./fonts";
+import { createDemoBook, getBook, getBooks, getFileBlob, importBook } from "./lib/library";
+import type { BookDocument, BookSummary } from "./lib/types";
+import { fontStack, READING_FONTS } from "./lib/fonts";
 import { ChapterNav } from "./ChapterNav";
 import {
   addSeconds,
@@ -34,16 +34,21 @@ import {
   recordOpen,
   setProgress,
   type BookStat
-} from "./readingStats";
+} from "./lib/readingStats";
+import {
+  loadPrefs,
+  updateGlobalPrefs,
+  type AppTheme,
+  type PageTheme,
+  type ViewMode,
+  type WidthMode
+} from "./lib/preferences";
 
 const PdfPageView = lazy(() =>
   import("./PdfPageView").then((module) => ({ default: module.PdfPageView }))
 );
 
-type WidthMode = "narrow" | "standard" | "wide";
-type ThemeMode = "white" | "paper" | "night";
-type AppTheme = "dark" | "light";
-type ViewMode = "reader" | "original";
+type ThemeMode = PageTheme;
 
 export function ReaderWorkspace() {
   const params = useParams({ strict: false }) as { bookId?: string };
@@ -51,11 +56,11 @@ export function ReaderWorkspace() {
   const queryClient = useQueryClient();
   const selectedBookId = params.bookId;
 
-  const [fontSize, setFontSize] = useState(19);
-  const [fontId, setFontId] = useState(DEFAULT_FONT_ID);
-  const [widthMode, setWidthMode] = useState<WidthMode>("standard");
-  const [themeMode, setThemeMode] = useState<ThemeMode>("night");
-  const [appTheme, setAppTheme] = useState<AppTheme>("dark");
+  const [fontSize, setFontSize] = useState(() => loadPrefs().global.fontSize);
+  const [fontId, setFontId] = useState(() => loadPrefs().global.fontId);
+  const [widthMode, setWidthMode] = useState<WidthMode>(() => loadPrefs().global.widthMode);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadPrefs().global.pageTheme);
+  const [appTheme, setAppTheme] = useState<AppTheme>(() => loadPrefs().global.appTheme);
   const [viewMode, setViewMode] = useState<ViewMode>("reader");
   const [query, setQuery] = useState("");
   const [chapterOpen, setChapterOpen] = useState(false);
@@ -76,8 +81,13 @@ export function ReaderWorkspace() {
     void navigate({ to: "/books/$bookId", params: { bookId: id } });
   };
 
+  // Persist reader preferences whenever they change (debounced in the lib).
+  useEffect(() => {
+    updateGlobalPrefs({ fontId, fontSize, widthMode, pageTheme: themeMode, appTheme });
+  }, [fontId, fontSize, widthMode, themeMode, appTheme]);
+
   const uploadMutation = useMutation({
-    mutationFn: uploadBook,
+    mutationFn: importBook,
     onSuccess: (book) => {
       queryClient.setQueryData(["book", book.id], book);
       void queryClient.invalidateQueries({ queryKey: ["books"] });
@@ -105,8 +115,19 @@ export function ReaderWorkspace() {
     setStats(recordOpen(selectedBookId));
     setViewMode("reader");
     setActiveSectionId(undefined);
-    stageRef.current?.scrollTo({ top: 0 });
   }, [selectedBookId]);
+
+  // Resume where the reader left off once the book content has rendered.
+  const activeBookId = bookQuery.data?.id;
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !activeBookId) return;
+    const { progress } = getStat(loadStats(), activeBookId);
+    requestAnimationFrame(() => {
+      const max = stage.scrollHeight - stage.clientHeight;
+      stage.scrollTo({ top: progress > 0.005 ? progress * max : 0 });
+    });
+  }, [activeBookId]);
 
   // Time-on-book: accrue reading seconds while the tab is visible.
   useEffect(() => {
@@ -268,8 +289,8 @@ function TopBar(props: {
           <BookOpen size={17} />
         </span>
         <div>
-          <strong>Bookform Reader</strong>
-          <span>Structured, readable output from any document</span>
+          <strong>Quire</strong>
+          <span>A quiet place to read anything</span>
         </div>
       </div>
 
@@ -621,6 +642,11 @@ function ReaderCanvas(props: {
   viewMode: ViewMode;
   query: string;
 }) {
+  const fileUrl = useFileUrl(
+    props.book?.id,
+    props.viewMode === "original" && Boolean(props.book?.hasOriginal)
+  );
+
   const matches = useMemo(() => {
     const search = props.query.trim().toLowerCase();
     if (!props.book || !search) return new Set<string>();
@@ -666,16 +692,23 @@ function ReaderCanvas(props: {
             <Files size={16} />
             <span>Original pages · {props.book.pageCount || "?"} pages · images and layout preserved</span>
           </div>
-          <Suspense
-            fallback={
-              <div className="pdf-state">
-                <Loader2 className="spin" size={28} />
-                <span>Loading page renderer…</span>
-              </div>
-            }
-          >
-            <PdfPageView bookId={props.book.id} fileUrl={`/api/books/${props.book.id}/file`} />
-          </Suspense>
+          {fileUrl ? (
+            <Suspense
+              fallback={
+                <div className="pdf-state">
+                  <Loader2 className="spin" size={28} />
+                  <span>Loading page renderer…</span>
+                </div>
+              }
+            >
+              <PdfPageView bookId={props.book.id} fileUrl={fileUrl} />
+            </Suspense>
+          ) : (
+            <div className="pdf-state">
+              <Loader2 className="spin" size={28} />
+              <span>Opening the original file…</span>
+            </div>
+          )}
         </div>
       </section>
     );
@@ -750,6 +783,33 @@ function ReaderCanvas(props: {
       </article>
     </section>
   );
+}
+
+// Turn the stored original bytes into a temporary object URL for pdf.js,
+// revoking it as soon as the page view goes away.
+function useFileUrl(bookId: string | undefined, enabled: boolean): string | undefined {
+  const [url, setUrl] = useState<string>();
+
+  useEffect(() => {
+    if (!bookId || !enabled) {
+      setUrl(undefined);
+      return;
+    }
+    let objectUrl: string | undefined;
+    let cancelled = false;
+    void getFileBlob(bookId).then((blob) => {
+      if (cancelled || !blob) return;
+      objectUrl = URL.createObjectURL(blob);
+      setUrl(objectUrl);
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setUrl(undefined);
+    };
+  }, [bookId, enabled]);
+
+  return url;
 }
 
 // Render code-like blocks (indented listings, symbol soup) in a monospace box so

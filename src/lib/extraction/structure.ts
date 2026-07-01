@@ -1,9 +1,10 @@
-import path from "node:path";
-import JSZip from "jszip";
-import pdfParse from "pdf-parse";
-import type { BookDocument, BookSection, SourceKind } from "./bookTypes";
+// Browser-safe port of the text-structuring pipeline that used to live in
+// server/extractors.ts. Everything here is pure string work — no DOM, no Node —
+// so it runs identically on the main thread and inside structure.worker.ts.
 
-type ExtractionResult = {
+import type { BookDocument, BookSection, CoverTint, SourceKind } from "../types";
+
+export interface ExtractedText {
   text: string;
   title?: string;
   author?: string;
@@ -11,28 +12,31 @@ type ExtractionResult = {
   pageCount?: number;
   sourceKind: SourceKind;
   warnings: string[];
-};
+}
 
-const HEADING_WORDS = /^(chapter|book|part|section|preface|contents|introduction|appendix|volume|memoirs|letter|prologue|epilogue)\b/i;
-const STRUCTURAL_OPENING_WORDS = /^(chapter|book|part|section|preface|contents|introduction|appendix|volume|letter|prologue|epilogue|foreword)\b/i;
-
-export async function extractBookDocument(input: {
+export interface BuildInput {
   id: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
   uploadedAt: string;
-  buffer: Buffer;
-  storedFile?: string;
-}): Promise<BookDocument> {
-  const extracted = await extractText(input.fileName, input.mimeType, input.buffer);
+  extracted: ExtractedText;
+  hasOriginal: boolean;
+}
+
+const HEADING_WORDS = /^(chapter|book|part|section|preface|contents|introduction|appendix|volume|memoirs|letter|prologue|epilogue)\b/i;
+const STRUCTURAL_OPENING_WORDS = /^(chapter|book|part|section|preface|contents|introduction|appendix|volume|letter|prologue|epilogue|foreword)\b/i;
+
+const COVER_TINTS: CoverTint[] = ["peach", "sage", "sky", "lilac", "butter"];
+
+export function buildBookDocument(input: BuildInput): BookDocument {
+  const { extracted } = input;
   const normalizedText = normalizeText(extracted.text);
   const blocks = createReadableBlocks(normalizedText);
   const inferredTitle = extracted.title || inferTitle(blocks, input.fileName);
   const sections = createSections(blocks, inferredTitle);
   const allParagraphs = sections.flatMap((section) => section.paragraphs);
   const joined = allParagraphs.join(" ");
-  const wordCount = countWords(joined);
 
   return {
     id: input.id,
@@ -46,47 +50,44 @@ export async function extractBookDocument(input: {
     language: extracted.language,
     pageCount: extracted.pageCount,
     characterCount: joined.length,
-    wordCount,
+    wordCount: countWords(joined),
     paragraphCount: allParagraphs.length,
     sectionCount: sections.length,
     rawSample: normalizedText.slice(0, 1800),
     warnings: extracted.warnings,
     sections,
-    storedFile: input.storedFile,
-    hasOriginal: extracted.sourceKind === "pdf" && Boolean(input.storedFile)
+    hasOriginal: input.hasOriginal,
+    coverTint: pickCoverTint(input.id)
   };
 }
 
-async function extractText(fileName: string, mimeType: string, buffer: Buffer): Promise<ExtractionResult> {
-  const extension = path.extname(fileName).toLowerCase();
-  const sourceKind = detectSourceKind(extension, mimeType);
+export function pickCoverTint(id: string): CoverTint {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return COVER_TINTS[hash % COVER_TINTS.length];
+}
+
+export function detectSourceKind(fileName: string, mimeType: string): SourceKind {
+  const extension = extnameOf(fileName);
+  const mime = mimeType.toLowerCase();
+  if (extension === ".pdf" || mime.includes("pdf")) return "pdf";
+  if (extension === ".epub" || mime.includes("epub")) return "epub";
+  if ([".html", ".htm"].includes(extension) || mime.includes("html")) return "html";
+  if ([".md", ".markdown"].includes(extension)) return "markdown";
+  if ([".txt", ".text"].includes(extension) || mime.startsWith("text/")) return "text";
+  return "unknown";
+}
+
+export function extractPlainFormats(text: string, sourceKind: SourceKind): ExtractedText {
   const warnings: string[] = [];
 
-  if (sourceKind === "pdf") {
-    const result = await pdfParse(buffer);
-    const info = result.info as Record<string, unknown> | undefined;
-    if (!result.text.trim()) {
-      warnings.push("No selectable text was found. This PDF may be scanned or image-only.");
-    }
-    return {
-      text: result.text,
-      title: asString(info?.Title),
-      author: asString(info?.Author),
-      pageCount: result.numpages,
-      sourceKind,
-      warnings
-    };
-  }
-
-  if (sourceKind === "epub") {
-    return extractEpub(buffer, warnings);
-  }
-
-  const text = buffer.toString("utf8");
   if (sourceKind === "html") {
-    const metadata = plainTextMetadata(htmlToText(text));
+    const converted = htmlToText(text);
+    const metadata = plainTextMetadata(converted);
     return {
-      text: htmlToText(text),
+      text: converted,
       title: findTagText(text, "title") || findTagText(text, "h1") || metadata.title,
       author: metadata.author,
       language: metadata.language,
@@ -118,63 +119,18 @@ async function extractText(fileName: string, mimeType: string, buffer: Buffer): 
   };
 }
 
-function detectSourceKind(extension: string, mimeType: string): SourceKind {
-  const mime = mimeType.toLowerCase();
-  if (extension === ".pdf" || mime.includes("pdf")) return "pdf";
-  if (extension === ".epub" || mime.includes("epub")) return "epub";
-  if ([".html", ".htm"].includes(extension) || mime.includes("html")) return "html";
-  if ([".md", ".markdown"].includes(extension)) return "markdown";
-  if ([".txt", ".text"].includes(extension) || mime.startsWith("text/")) return "text";
-  return "unknown";
-}
+/* ------------------------------------------------------------------ */
+/* EPUB helpers (jszip itself is driven by the worker)                 */
+/* ------------------------------------------------------------------ */
 
-async function extractEpub(buffer: Buffer, warnings: string[]): Promise<ExtractionResult> {
-  const zip = await JSZip.loadAsync(buffer);
-  const container = await zip.file("META-INF/container.xml")?.async("string");
-  const rootfile = container?.match(/full-path=["']([^"']+)["']/i)?.[1];
-  if (!rootfile) {
-    warnings.push("EPUB package metadata was not found. Reading all XHTML files instead.");
-  }
-
-  const opfText = rootfile ? await zip.file(rootfile)?.async("string") : undefined;
-  const baseDir = rootfile ? path.posix.dirname(rootfile) : "";
-  const title = opfText ? decodeEntities(stripTags(findXmlText(opfText, "dc:title") || "")) : undefined;
-  const author = opfText ? decodeEntities(stripTags(findXmlText(opfText, "dc:creator") || "")) : undefined;
-  const language = opfText ? decodeEntities(stripTags(findXmlText(opfText, "dc:language") || "")) : undefined;
-  const orderedFiles = opfText ? getEpubSpineFiles(opfText, baseDir) : [];
-  const fallbackFiles = Object.keys(zip.files).filter((name) => /\.(xhtml|html|htm)$/i.test(name));
-  const files = orderedFiles.length ? orderedFiles : fallbackFiles;
-  const parts: string[] = [];
-
-  for (const filePath of files) {
-    const entry = zip.file(filePath);
-    if (!entry) continue;
-    const html = await entry.async("string");
-    parts.push(htmlToText(html));
-  }
-
-  if (!parts.length) {
-    warnings.push("No readable EPUB spine files were found.");
-  }
-
-  return {
-    text: parts.join("\n\n"),
-    title,
-    author,
-    language,
-    sourceKind: "epub",
-    warnings
-  };
-}
-
-function getEpubSpineFiles(opfText: string, baseDir: string): string[] {
+export function getEpubSpineFiles(opfText: string, baseDir: string): string[] {
   const manifest = new Map<string, string>();
   for (const item of opfText.matchAll(/<item\b[^>]*>/gi)) {
     const tag = item[0];
     const id = attr(tag, "id");
     const href = attr(tag, "href");
     if (id && href) {
-      manifest.set(id, path.posix.normalize(path.posix.join(baseDir, href)));
+      manifest.set(id, posixNormalize(posixJoin(baseDir, href)));
     }
   }
 
@@ -187,11 +143,32 @@ function getEpubSpineFiles(opfText: string, baseDir: string): string[] {
   return files;
 }
 
-function normalizeText(text: string): string {
+export function findEpubCoverHref(opfText: string, baseDir: string): string | undefined {
+  const coverId =
+    opfText.match(/<meta\b[^>]*name=["']cover["'][^>]*>/i)?.[0].match(/content=["']([^"']+)["']/i)?.[1];
+  for (const item of opfText.matchAll(/<item\b[^>]*>/gi)) {
+    const tag = item[0];
+    const id = attr(tag, "id");
+    const href = attr(tag, "href");
+    const mediaType = attr(tag, "media-type") || "";
+    const properties = attr(tag, "properties") || "";
+    if (!href || !mediaType.startsWith("image/")) continue;
+    if ((coverId && id === coverId) || /cover-image/.test(properties) || /cover/i.test(href)) {
+      return posixNormalize(posixJoin(baseDir, href));
+    }
+  }
+  return undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* Structuring pipeline                                                */
+/* ------------------------------------------------------------------ */
+
+export function normalizeText(text: string): string {
   return text
-    .replace(/^\uFEFF/, "")
+    .replace(/^﻿/, "")
     .replace(/\r\n?/g, "\n")
-    .replace(/\u00a0/g, " ")
+    .replace(/ /g, " ")
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{4,}/g, "\n\n\n")
     .trim();
@@ -360,10 +337,10 @@ function inferTitle(blocks: string[], fileName: string): string {
   });
 
   if (firstStrongBlock) return firstStrongBlock.replace(/^#+\s*/, "");
-  return path.basename(fileName, path.extname(fileName)).replace(/[-_]+/g, " ");
+  return basenameWithoutExt(fileName).replace(/[-_]+/g, " ");
 }
 
-function cleanDisplayText(text: string): string {
+export function cleanDisplayText(text: string): string {
   return decodeEntities(text)
     .replace(/\s+/g, " ")
     .replace(/[|]{2,}/g, "|")
@@ -374,7 +351,11 @@ function normalizedForMatch(text: string): string {
   return cleanDisplayText(text).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-function htmlToText(html: string): string {
+/* ------------------------------------------------------------------ */
+/* Format converters                                                   */
+/* ------------------------------------------------------------------ */
+
+export function htmlToText(html: string): string {
   return decodeEntities(
     html
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -409,11 +390,11 @@ function findTagText(html: string, tagName: string): string | undefined {
   return html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"))?.[1]?.replace(/<[^>]+>/g, " ").trim();
 }
 
-function findXmlText(xml: string, tagName: string): string | undefined {
+export function findXmlText(xml: string, tagName: string): string | undefined {
   return xml.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"))?.[1]?.trim();
 }
 
-function stripTags(text: string): string {
+export function stripTags(text: string): string {
   return text.replace(/<[^>]+>/g, " ");
 }
 
@@ -421,7 +402,7 @@ function attr(tag: string, name: string): string | undefined {
   return tag.match(new RegExp(`\\b${name}=["']([^"']+)["']`, "i"))?.[1];
 }
 
-function decodeEntities(text: string): string {
+export function decodeEntities(text: string): string {
   const named: Record<string, string> = {
     amp: "&",
     lt: "<",
@@ -448,10 +429,48 @@ function slugify(value: string): string {
     .slice(0, 80) || "section";
 }
 
-function countWords(text: string): number {
+export function countWords(text: string): number {
   return text.match(/\b[\w']+\b/g)?.length || 0;
 }
 
-function asString(value: unknown): string | undefined {
+export function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tiny path helpers (replace node:path for EPUB internal hrefs)       */
+/* ------------------------------------------------------------------ */
+
+function extnameOf(fileName: string): string {
+  const base = fileName.slice(fileName.lastIndexOf("/") + 1);
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(dot).toLowerCase() : "";
+}
+
+function basenameWithoutExt(fileName: string): string {
+  const base = fileName.slice(Math.max(fileName.lastIndexOf("/"), fileName.lastIndexOf("\\")) + 1);
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(0, dot) : base;
+}
+
+export function posixDirname(p: string): string {
+  const index = p.lastIndexOf("/");
+  return index === -1 ? "" : p.slice(0, index);
+}
+
+function posixJoin(...parts: string[]): string {
+  return parts.filter(Boolean).join("/");
+}
+
+function posixNormalize(p: string): string {
+  const output: string[] = [];
+  for (const segment of p.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      output.pop();
+    } else {
+      output.push(segment);
+    }
+  }
+  return output.join("/");
 }

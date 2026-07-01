@@ -28,7 +28,15 @@ const bookRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([indexRoute, bookRoute]);
 const router = createRouter({ routeTree });
-const queryClient = new QueryClient();
+
+// Data lives in IndexedDB: "always" keeps queries running while offline, and
+// nothing goes stale on its own — we invalidate explicitly after writes.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { networkMode: "always", staleTime: Infinity, retry: false },
+    mutations: { networkMode: "always" }
+  }
+});
 
 declare module "@tanstack/react-router" {
   interface Register {
