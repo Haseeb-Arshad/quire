@@ -1,0 +1,105 @@
+/* ------------------------------------------------------------------ */
+/* Quire design tokens — warm, light-first, with a secondary dark mode */
+/* ------------------------------------------------------------------ */
+
+:root {
+  /* Type */
+  --font-sans: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: "New York", "Iowan Old Style", "Palatino Linotype", Georgia,
+    "Times New Roman", serif;
+
+  /* Text — subtle / default / strong (warm greys, never pure black) */
+  --text-subtle: #8a8377;
+  --text-default: #3d382f;
+  --text-strong: #211d16;
+
+  /* Surfaces — layered cream */
+  --bg: #faf7f0;
+  --bg-panel: #f4efe4;
+  --bg-elevated: #ffffff;
+  --bg-selected: #efe8d8;
+
+  /* Hairlines */
+  --border: rgba(60, 50, 30, 0.08);
+  --border-hover: rgba(60, 50, 30, 0.14);
+  --border-active: rgba(60, 50, 30, 0.24);
+
+  /* Fills for hover / active states */
+  --fill-hover: rgba(60, 50, 30, 0.04);
+  --fill-active: rgba(60, 50, 30, 0.08);
+
+  /* Accent — terracotta */
+  --accent: #c96f4a;
+  --accent-ink: #8a4a30;
+  --accent-soft: rgba(201, 111, 74, 0.12);
+
+  /* Pastel tint system (cards, chips, badges, cover dots) */
+  --tint-peach: #f6e3d7;
+  --tint-sage: #e2ead9;
+  --tint-sky: #dde8ee;
+  --tint-lilac: #e8e2ef;
+  --tint-butter: #f5ecd3;
+  --tint-ink-peach: #9a5b3c;
+  --tint-ink-sage: #5c7050;
+  --tint-ink-sky: #4a6b7e;
+  --tint-ink-lilac: #6b5c85;
+  --tint-ink-butter: #8a7638;
+
+  /* Shape */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Depth — warm, low-key */
+  --shadow-1: 0 1px 2px rgba(50, 40, 20, 0.05), 0 0 0 1px var(--border);
+  --shadow-2: 0 4px 16px rgba(50, 40, 20, 0.08), 0 1px 3px rgba(50, 40, 20, 0.06),
+    0 0 0 1px var(--border);
+  --shadow-3: 0 16px 48px rgba(50, 40, 20, 0.16), 0 0 0 1px var(--border);
+
+  /* Highlight marks (reader) */
+  --mark-search: rgba(255, 200, 60, 0.4);
+  --mark-search-active: rgba(255, 170, 20, 0.65);
+}
+
+[data-app-theme="dark"] {
+  --text-subtle: #a39d90;
+  --text-default: #e8e4da;
+  --text-strong: #f7f4ec;
+
+  --bg: #191713;
+  --bg-panel: #1e1c17;
+  --bg-elevated: #24211b;
+  --bg-selected: #2a2620;
+
+  --border: rgba(255, 244, 220, 0.07);
+  --border-hover: rgba(255, 244, 220, 0.12);
+  --border-active: rgba(255, 244, 220, 0.2);
+
+  --fill-hover: rgba(255, 244, 220, 0.05);
+  --fill-active: rgba(255, 244, 220, 0.09);
+
+  --accent: #d98a63;
+  --accent-ink: #e8ac8c;
+  --accent-soft: rgba(217, 138, 99, 0.15);
+
+  --tint-peach: #372a20;
+  --tint-sage: #262e20;
+  --tint-sky: #212b31;
+  --tint-lilac: #2b2531;
+  --tint-butter: #322c1d;
+  --tint-ink-peach: #d9a482;
+  --tint-ink-sage: #a8bd97;
+  --tint-ink-sky: #93b3c4;
+  --tint-ink-lilac: #b3a3cc;
+  --tint-ink-butter: #cbb877;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--border);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3),
+    0 0 0 1px var(--border);
+  --shadow-3: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border);
+
+  --mark-search: rgba(255, 190, 90, 0.3);
+  --mark-search-active: rgba(255, 170, 20, 0.5);
+}

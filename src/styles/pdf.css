@@ -1,0 +1,158 @@
+/* ------------------------------------------------------------------ */
+/* Original Pages view (pdf.js canvases) + lightbox                    */
+/* ------------------------------------------------------------------ */
+
+.pages-mode {
+  padding: 28px 28px 48px;
+}
+
+.pages-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--reader-muted);
+  margin-bottom: 20px;
+  font-size: 12px;
+}
+
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.pdf-page {
+  position: relative;
+}
+
+.pdf-page-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.pdf-page-num {
+  color: var(--reader-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--reader-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.pdf-page:hover .pdf-open {
+  opacity: 1;
+}
+
+.pdf-canvas-btn {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--reader-border);
+  border-radius: var(--radius-sm);
+  background: var(--reader-bg);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.pdf-canvas {
+  display: block;
+  width: 100%;
+  filter: var(--pdf-filter, none);
+}
+
+.pdf-canvas-skeleton {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--reader-muted);
+}
+
+.pdf-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--reader-muted);
+  text-align: center;
+}
+
+/* --------------------------- Lightbox ----------------------------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: rgba(20, 16, 8, 0.82);
+  backdrop-filter: blur(3px);
+}
+
+.lightbox-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  color: #f3efe6;
+}
+
+.lightbox-bar span {
+  font-variant-numeric: tabular-nums;
+}
+
+.lightbox-zoom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lightbox-zoom button,
+.lightbox-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lightbox-zoom button svg,
+.lightbox-close svg {
+  color: #f3efe6;
+}
+
+.lightbox-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: safe center;
+  align-items: safe center;
+  padding: 12px 24px 32px;
+}
+
+.lightbox-canvas {
+  border-radius: 4px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  filter: var(--pdf-filter, none);
+}

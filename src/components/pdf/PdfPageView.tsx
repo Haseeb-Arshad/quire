@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Maximize2, Minus, Plus, X } from "lucide-react";
-import { pdfjsLib, type PDFDocumentProxy, type RenderTask } from "./lib/pdf";
+import { pdfjsLib, type PDFDocumentProxy, type RenderTask } from "../../lib/pdf";
 
 export function PdfPageView({ bookId, fileUrl }: { bookId: string; fileUrl: string }) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);

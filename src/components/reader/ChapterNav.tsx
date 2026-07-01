@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, List, Search } from "lucide-react";
-import type { BookDocument } from "./lib/types";
+import type { BookDocument } from "../../lib/types";
 
 // A focused chapter-jump overlay (command-palette style): filterable, keyboard
 // driven, and aware of which chapter you're currently reading.

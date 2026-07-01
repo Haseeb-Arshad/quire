@@ -1,0 +1,69 @@
+/* ------------------------------------------------------------------ */
+/* Reading page themes — applied via data-page-theme on the reader     */
+/* stage. --pdf-filter tints the Original Pages canvases to match.     */
+/* ------------------------------------------------------------------ */
+
+[data-page-theme] {
+  --reader-bg: #f7f2e7;
+  --reader-ink: #2a251c;
+  --reader-muted: #7a7060;
+  --reader-border: rgba(0, 0, 0, 0.08);
+  --reader-mark: rgba(255, 200, 60, 0.4);
+  --pdf-filter: none;
+}
+
+[data-page-theme="white"] {
+  --reader-bg: #ffffff;
+  --reader-ink: #1c1c1e;
+  --reader-muted: #6e6e73;
+  --reader-border: rgba(0, 0, 0, 0.08);
+  --reader-mark: rgba(255, 200, 60, 0.4);
+  --pdf-filter: none;
+}
+
+[data-page-theme="paper"] {
+  --reader-bg: #f7f2e7;
+  --reader-ink: #2a251c;
+  --reader-muted: #7a7060;
+  --reader-border: rgba(0, 0, 0, 0.08);
+  --reader-mark: rgba(255, 200, 60, 0.42);
+  --pdf-filter: sepia(0.14) brightness(0.985) saturate(0.92);
+}
+
+[data-page-theme="sepia"] {
+  --reader-bg: #f4ecd8;
+  --reader-ink: #5b4636;
+  --reader-muted: #8f7a63;
+  --reader-border: rgba(91, 70, 54, 0.14);
+  --reader-mark: rgba(255, 190, 70, 0.45);
+  --pdf-filter: sepia(0.42) brightness(0.96) contrast(0.94);
+}
+
+[data-page-theme="grey"] {
+  --reader-bg: #e2e3e5;
+  --reader-ink: #3f4247;
+  --reader-muted: #75787e;
+  --reader-border: rgba(63, 66, 71, 0.14);
+  --reader-mark: rgba(255, 200, 60, 0.45);
+  --pdf-filter: grayscale(0.25) brightness(0.9) contrast(0.88);
+}
+
+[data-page-theme="night"] {
+  --reader-bg: #141414;
+  --reader-ink: #d8d8d6;
+  --reader-muted: #8f8f8c;
+  --reader-border: rgba(255, 255, 255, 0.09);
+  --reader-mark: rgba(255, 190, 90, 0.26);
+  --pdf-filter: invert(0.93) hue-rotate(180deg) brightness(1.02) contrast(0.94);
+}
+
+/* Low-blue evening theme: warm amber ink on near-black, PDF pages pushed
+   through an invert + sepia chain toward candlelight. */
+[data-page-theme="focus"] {
+  --reader-bg: #181310;
+  --reader-ink: #e6d3ae;
+  --reader-muted: #9a866a;
+  --reader-border: rgba(230, 211, 174, 0.12);
+  --reader-mark: rgba(255, 190, 90, 0.24);
+  --pdf-filter: invert(0.9) sepia(0.55) hue-rotate(-25deg) brightness(0.95) saturate(1.3);
+}

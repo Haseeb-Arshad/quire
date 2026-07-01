@@ -7,23 +7,25 @@ import {
   createRoute,
   createRouter
 } from "@tanstack/react-router";
-import { ReaderWorkspace } from "./ReaderWorkspace";
-import "./styles.css";
+import { AppShell } from "./app/AppShell";
+import { LibraryPage } from "./app/LibraryPage";
+import { ReaderPage } from "./app/ReaderPage";
+import "./styles/index.css";
 
 const rootRoute = createRootRoute({
-  component: () => <ReaderWorkspace />
+  component: AppShell
 });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: () => null
+  component: LibraryPage
 });
 
 const bookRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "books/$bookId",
-  component: () => null
+  component: ReaderPage
 });
 
 const routeTree = rootRoute.addChildren([indexRoute, bookRoute]);
