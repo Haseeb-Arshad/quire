@@ -1,0 +1,8 @@
+node_modules/
+dist/
+storage/
+.npm-cache/
+.playwright-mcp/
+*.png
+*.log
+*.tsbuildinfo
