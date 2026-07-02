@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo } from "react";
 import { BookOpen, Files, Loader2 } from "lucide-react";
 import type { BookDocument } from "../../lib/types";
-import type { ViewMode, WidthMode } from "../../lib/preferences";
+import type { PageTheme, ViewMode, WidthMode } from "../../lib/preferences";
 import { fontStack } from "../../lib/fonts";
 import { getFileBlob } from "../../lib/library";
 import { useBlobUrl } from "../../lib/hooks";
@@ -18,6 +18,7 @@ export function ReaderCanvas(props: {
   fontId: string;
   widthMode: WidthMode;
   viewMode: ViewMode;
+  pageTheme: PageTheme;
   query: string;
 }) {
   const fileUrl = useBlobUrl(
@@ -80,7 +81,7 @@ export function ReaderCanvas(props: {
                 </div>
               }
             >
-              <PdfPageView bookId={props.book.id} fileUrl={fileUrl} />
+              <PdfPageView bookId={props.book.id} fileUrl={fileUrl} pageTheme={props.pageTheme} />
             </Suspense>
           ) : (
             <div className="pdf-state">

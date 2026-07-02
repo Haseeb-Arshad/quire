@@ -3,7 +3,7 @@ import { ArrowLeft, Layers, Moon, Search, Sun } from "lucide-react";
 import type { ViewMode, WidthMode } from "../../lib/preferences";
 import { Segmented } from "../ui/Segmented";
 import { TypeMenu } from "./TypeMenu";
-import { ThemeMenu } from "./ThemeMenu";
+import { ThemeMenu, type ThemeScope } from "./ThemeMenu";
 import { useAppTheme } from "../../app/AppShell";
 import type { PageTheme } from "../../lib/preferences";
 
@@ -22,6 +22,8 @@ export function TopBar(props: {
   onFontId: (value: string) => void;
   onWidthMode: (value: WidthMode) => void;
   onPageTheme: (value: PageTheme) => void;
+  themeScope: ThemeScope;
+  onThemeScope: (scope: ThemeScope) => void;
   onViewMode: (value: ViewMode) => void;
   onOpenChapters: () => void;
   query: string;
@@ -82,7 +84,13 @@ export function TopBar(props: {
           onWidthMode={props.onWidthMode}
         />
 
-        <ThemeMenu pageTheme={props.pageTheme} onPageTheme={props.onPageTheme} />
+        <ThemeMenu
+          pageTheme={props.pageTheme}
+          onPageTheme={props.onPageTheme}
+          themeScope={props.themeScope}
+          onThemeScope={props.onThemeScope}
+          canScopeToBook={props.canNavigate}
+        />
 
         <button
           className="icon-button"

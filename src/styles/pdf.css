@@ -69,10 +69,12 @@
   cursor: zoom-in;
 }
 
+/* Theme filters are baked into the bitmap at render time (lib/pdfFilters.ts),
+   not applied here — CSS filters on large canvases composite unreliably. */
 .pdf-canvas {
   display: block;
   width: 100%;
-  filter: var(--pdf-filter, none);
+  aspect-ratio: 0.773; /* letter-ish placeholder until the real page reports */
 }
 
 .pdf-canvas-skeleton {
@@ -154,5 +156,4 @@
 .lightbox-canvas {
   border-radius: 4px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
-  filter: var(--pdf-filter, none);
 }

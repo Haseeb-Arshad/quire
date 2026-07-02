@@ -1,6 +1,6 @@
 /* ------------------------------------------------------------------ */
 /* Reading page themes — applied via data-page-theme on the reader     */
-/* stage. --pdf-filter tints the Original Pages canvases to match.     */
+/* stage. PDF canvas tinting is baked at render time (lib/pdfFilters).  */
 /* ------------------------------------------------------------------ */
 
 [data-page-theme] {
@@ -9,7 +9,6 @@
   --reader-muted: #7a7060;
   --reader-border: rgba(0, 0, 0, 0.08);
   --reader-mark: rgba(255, 200, 60, 0.4);
-  --pdf-filter: none;
 }
 
 [data-page-theme="white"] {
@@ -18,7 +17,6 @@
   --reader-muted: #6e6e73;
   --reader-border: rgba(0, 0, 0, 0.08);
   --reader-mark: rgba(255, 200, 60, 0.4);
-  --pdf-filter: none;
 }
 
 [data-page-theme="paper"] {
@@ -27,7 +25,6 @@
   --reader-muted: #7a7060;
   --reader-border: rgba(0, 0, 0, 0.08);
   --reader-mark: rgba(255, 200, 60, 0.42);
-  --pdf-filter: sepia(0.14) brightness(0.985) saturate(0.92);
 }
 
 [data-page-theme="sepia"] {
@@ -36,7 +33,6 @@
   --reader-muted: #8f7a63;
   --reader-border: rgba(91, 70, 54, 0.14);
   --reader-mark: rgba(255, 190, 70, 0.45);
-  --pdf-filter: sepia(0.42) brightness(0.96) contrast(0.94);
 }
 
 [data-page-theme="grey"] {
@@ -45,7 +41,6 @@
   --reader-muted: #75787e;
   --reader-border: rgba(63, 66, 71, 0.14);
   --reader-mark: rgba(255, 200, 60, 0.45);
-  --pdf-filter: grayscale(0.25) brightness(0.9) contrast(0.88);
 }
 
 [data-page-theme="night"] {
@@ -54,7 +49,6 @@
   --reader-muted: #8f8f8c;
   --reader-border: rgba(255, 255, 255, 0.09);
   --reader-mark: rgba(255, 190, 90, 0.26);
-  --pdf-filter: invert(0.93) hue-rotate(180deg) brightness(1.02) contrast(0.94);
 }
 
 /* Low-blue evening theme: warm amber ink on near-black, PDF pages pushed
@@ -65,5 +59,4 @@
   --reader-muted: #9a866a;
   --reader-border: rgba(230, 211, 174, 0.12);
   --reader-mark: rgba(255, 190, 90, 0.24);
-  --pdf-filter: invert(0.9) sepia(0.55) hue-rotate(-25deg) brightness(0.95) saturate(1.3);
 }

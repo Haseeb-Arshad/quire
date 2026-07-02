@@ -4,11 +4,14 @@ import { useParams } from "@tanstack/react-router";
 import { getBook } from "../lib/library";
 import {
   loadPrefs,
+  resolveForBook,
+  updateBookPrefs,
   updateGlobalPrefs,
   type PageTheme,
   type ViewMode,
   type WidthMode
 } from "../lib/preferences";
+import type { ThemeScope } from "../components/reader/ThemeMenu";
 import { addSeconds, getStat, loadStats, recordOpen, setProgress } from "../lib/readingStats";
 import { TopBar } from "../components/reader/TopBar";
 import { ReaderCanvas } from "../components/reader/ReaderCanvas";
@@ -21,7 +24,10 @@ export function ReaderPage() {
   const [fontSize, setFontSize] = useState(() => loadPrefs().global.fontSize);
   const [fontId, setFontId] = useState(() => loadPrefs().global.fontId);
   const [widthMode, setWidthMode] = useState<WidthMode>(() => loadPrefs().global.widthMode);
-  const [pageTheme, setPageTheme] = useState<PageTheme>(() => loadPrefs().global.pageTheme);
+  const [pageTheme, setPageTheme] = useState<PageTheme>(() => resolveForBook(bookId).pageTheme);
+  const [themeScope, setThemeScope] = useState<ThemeScope>(() =>
+    loadPrefs().perBook[bookId]?.pageTheme ? "book" : "global"
+  );
   const [viewMode, setViewMode] = useState<ViewMode>("reader");
   const [query, setQuery] = useState("");
   const [chapterOpen, setChapterOpen] = useState(false);
@@ -38,9 +44,29 @@ export function ReaderPage() {
   const activeBook = bookQuery.data;
 
   // Persist reader preferences whenever they change (debounced in the lib).
+  // The page theme persists through its own handlers so it can scope per-book.
   useEffect(() => {
-    updateGlobalPrefs({ fontId, fontSize, widthMode, pageTheme });
-  }, [fontId, fontSize, widthMode, pageTheme]);
+    updateGlobalPrefs({ fontId, fontSize, widthMode });
+  }, [fontId, fontSize, widthMode]);
+
+  const onPageTheme = (theme: PageTheme) => {
+    setPageTheme(theme);
+    if (themeScope === "book") {
+      updateBookPrefs(bookId, { pageTheme: theme });
+    } else {
+      updateGlobalPrefs({ pageTheme: theme });
+    }
+  };
+
+  const onThemeScope = (scope: ThemeScope) => {
+    setThemeScope(scope);
+    if (scope === "book") {
+      updateBookPrefs(bookId, { pageTheme });
+    } else {
+      updateBookPrefs(bookId, { pageTheme: undefined });
+      setPageTheme(loadPrefs().global.pageTheme);
+    }
+  };
 
   // Count a fresh open + reset transient state for each book.
   useEffect(() => {
@@ -49,6 +75,8 @@ export function ReaderPage() {
     setViewMode("reader");
     setActiveSectionId(undefined);
     setQuery("");
+    setPageTheme(resolveForBook(bookId).pageTheme);
+    setThemeScope(loadPrefs().perBook[bookId]?.pageTheme ? "book" : "global");
   }, [bookId]);
 
   // Resume where the reader left off once the book content has rendered.
@@ -152,7 +180,9 @@ export function ReaderPage() {
         onFontSize={setFontSize}
         onFontId={setFontId}
         onWidthMode={setWidthMode}
-        onPageTheme={setPageTheme}
+        onPageTheme={onPageTheme}
+        themeScope={themeScope}
+        onThemeScope={onThemeScope}
         onViewMode={setViewMode}
         onOpenChapters={() => setChapterOpen(true)}
         query={query}
@@ -167,6 +197,7 @@ export function ReaderPage() {
         fontId={fontId}
         widthMode={widthMode}
         viewMode={viewMode}
+        pageTheme={pageTheme}
         query={query}
       />
 

@@ -19,7 +19,15 @@ export const PAGE_THEMES: ThemeOption[] = [
   { id: "focus", label: "Focus", bg: "#181310", ink: "#e6d3ae", hint: "Low-blue evening amber" }
 ];
 
-export function ThemeMenu(props: { pageTheme: PageTheme; onPageTheme: (value: PageTheme) => void }) {
+export type ThemeScope = "global" | "book";
+
+export function ThemeMenu(props: {
+  pageTheme: PageTheme;
+  onPageTheme: (value: PageTheme) => void;
+  themeScope: ThemeScope;
+  onThemeScope: (scope: ThemeScope) => void;
+  canScopeToBook: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -74,6 +82,19 @@ export function ThemeMenu(props: { pageTheme: PageTheme; onPageTheme: (value: Pa
               ))}
             </div>
           </div>
+
+          {props.canScopeToBook ? (
+            <div className="type-section">
+              <label className="theme-scope">
+                <input
+                  type="checkbox"
+                  checked={props.themeScope === "book"}
+                  onChange={(event) => props.onThemeScope(event.target.checked ? "book" : "global")}
+                />
+                <span>Only for this book</span>
+              </label>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

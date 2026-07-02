@@ -487,6 +487,18 @@
   color: var(--text-default);
 }
 
+.theme-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-default);
+  cursor: pointer;
+}
+
+.theme-scope input {
+  accent-color: var(--accent);
+}
+
 /* --------------------------- Chapter overlay ---------------------- */
 
 .chapter-overlay {
