@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { getBook } from "../lib/library";
 import {
@@ -11,15 +11,21 @@ import {
   type ViewMode,
   type WidthMode
 } from "../lib/preferences";
-import type { ThemeScope } from "../components/reader/ThemeMenu";
-import { addSeconds, getStat, loadStats, recordOpen, setProgress } from "../lib/readingStats";
+import { addSeconds, recordOpen, setProgress } from "../lib/readingStats";
+import { runSearch } from "../lib/search";
+import { addBookmark, addHighlights, deleteAnnotation, getAnnotations } from "../lib/annotations";
+import type { Annotation, HighlightColor } from "../lib/types";
+import type { SelectionDraft } from "../lib/anchors";
 import { TopBar } from "../components/reader/TopBar";
 import { ReaderCanvas } from "../components/reader/ReaderCanvas";
 import { OutlineRail } from "../components/reader/OutlineRail";
 import { ChapterNav } from "../components/reader/ChapterNav";
+import { ShortcutsDialog } from "../components/reader/ShortcutsDialog";
+import type { ThemeScope } from "../components/reader/ThemeMenu";
 
 export function ReaderPage() {
   const { bookId } = useParams({ from: "/books/$bookId" });
+  const queryClient = useQueryClient();
 
   const [fontSize, setFontSize] = useState(() => loadPrefs().global.fontSize);
   const [fontId, setFontId] = useState(() => loadPrefs().global.fontId);
@@ -30,11 +36,15 @@ export function ReaderPage() {
   );
   const [viewMode, setViewMode] = useState<ViewMode>("reader");
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [chapterOpen, setChapterOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string | undefined>();
   const [liveProgress, setLiveProgress] = useState(0);
 
   const stageRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const bookQuery = useQuery({
     queryKey: ["book", bookId],
@@ -42,6 +52,56 @@ export function ReaderPage() {
     enabled: Boolean(bookId)
   });
   const activeBook = bookQuery.data;
+
+  const annotationsQuery = useQuery({
+    queryKey: ["annotations", bookId],
+    queryFn: () => getAnnotations(bookId),
+    enabled: Boolean(bookId)
+  });
+  const annotations: Annotation[] = annotationsQuery.data || [];
+
+  const invalidateAnnotations = () =>
+    queryClient.invalidateQueries({ queryKey: ["annotations", bookId] });
+
+  const highlightMutation = useMutation({
+    mutationFn: ({ drafts, color }: { drafts: SelectionDraft[]; color: HighlightColor }) =>
+      addHighlights(bookId, drafts, color),
+    onSuccess: invalidateAnnotations
+  });
+
+  const bookmarkMutation = useMutation({
+    mutationFn: (input: { sectionId: string; paraIndex: number; label: string }) =>
+      addBookmark(bookId, input.sectionId, input.paraIndex, input.label),
+    onSuccess: invalidateAnnotations
+  });
+
+  const deleteAnnotationMutation = useMutation({
+    mutationFn: deleteAnnotation,
+    onSuccess: invalidateAnnotations
+  });
+
+  /* ------------------------------- search ------------------------------ */
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 200);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const searchMatches = useMemo(
+    () => runSearch(activeBook, debouncedQuery),
+    [activeBook, debouncedQuery]
+  );
+
+  useEffect(() => {
+    setActiveMatchIndex(0);
+  }, [searchMatches]);
+
+  const stepMatch = (delta: number) => {
+    if (!searchMatches.length) return;
+    setActiveMatchIndex((index) => (index + delta + searchMatches.length) % searchMatches.length);
+  };
+
+  /* --------------------------- prefs + themes -------------------------- */
 
   // Persist reader preferences whenever they change (debounced in the lib).
   // The page theme persists through its own handlers so it can scope per-book.
@@ -68,6 +128,8 @@ export function ReaderPage() {
     }
   };
 
+  /* ------------------------- per-book lifecycle ------------------------ */
+
   // Count a fresh open + reset transient state for each book.
   useEffect(() => {
     if (!bookId) return;
@@ -79,15 +141,25 @@ export function ReaderPage() {
     setThemeScope(loadPrefs().perBook[bookId]?.pageTheme ? "book" : "global");
   }, [bookId]);
 
-  // Resume where the reader left off once the book content has rendered.
+  // Resume where the reader left off once the book content has rendered:
+  // paragraph anchor first, scroll ratio as the fallback.
   const activeBookId = activeBook?.id;
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !activeBookId) return;
-    const { progress } = getStat(loadStats(), activeBookId);
+    const resume = loadPrefs().perBook[activeBookId]?.resume;
     requestAnimationFrame(() => {
+      if (resume?.sectionId !== undefined && resume.paraIndex !== undefined) {
+        const anchor = stage.querySelector<HTMLElement>(
+          `[data-section-id="${CSS.escape(resume.sectionId)}"][data-para="${resume.paraIndex}"]`
+        );
+        if (anchor && resume.ratio > 0.005) {
+          anchor.scrollIntoView({ block: "start" });
+          return;
+        }
+      }
       const max = stage.scrollHeight - stage.clientHeight;
-      stage.scrollTo({ top: progress > 0.005 ? progress * max : 0 });
+      stage.scrollTo({ top: resume && resume.ratio > 0.005 ? resume.ratio * max : 0 });
     });
   }, [activeBookId]);
 
@@ -109,16 +181,32 @@ export function ReaderPage() {
     };
   }, [bookId]);
 
-  // Track scroll-through progress + which chapter is on screen.
+  // Track scroll-through progress, the on-screen chapter, and the resume anchor.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !activeBook || viewMode !== "reader") return;
+
+    let anchorTimer: number | undefined;
+    const recordAnchor = () => {
+      anchorTimer = undefined;
+      const top = topmostParagraph(stage);
+      const max = stage.scrollHeight - stage.clientHeight;
+      const ratio = max > 0 ? stage.scrollTop / max : 0;
+      updateBookPrefs(activeBook.id, {
+        resume: top
+          ? { sectionId: top.dataset.sectionId, paraIndex: Number(top.dataset.para), ratio }
+          : { ratio }
+      });
+    };
 
     const onScroll = () => {
       const max = stage.scrollHeight - stage.clientHeight;
       const ratio = max > 0 ? stage.scrollTop / max : 0;
       setProgress(activeBook.id, ratio);
       setLiveProgress(ratio);
+      if (anchorTimer === undefined) {
+        anchorTimer = window.setTimeout(recordAnchor, 500);
+      }
     };
     onScroll();
     stage.addEventListener("scroll", onScroll, { passive: true });
@@ -137,23 +225,77 @@ export function ReaderPage() {
 
     return () => {
       stage.removeEventListener("scroll", onScroll);
+      if (anchorTimer !== undefined) window.clearTimeout(anchorTimer);
       observer.disconnect();
     };
   }, [activeBook, viewMode]);
 
-  // Global shortcut: "c" opens the chapter navigator.
+  /* ------------------------------ shortcuts ---------------------------- */
+
+  const bookmarkHere = () => {
+    const stage = stageRef.current;
+    if (!stage || !activeBook) return;
+    const top = topmostParagraph(stage);
+    if (!top?.dataset.sectionId) return;
+    bookmarkMutation.mutate({
+      sectionId: top.dataset.sectionId,
+      paraIndex: Number(top.dataset.para),
+      label: (top.textContent || "").trim().slice(0, 80)
+    });
+  };
+
+  const stepChapter = (delta: number) => {
+    if (!activeBook) return;
+    const sections = activeBook.sections;
+    const currentIndex = Math.max(
+      0,
+      sections.findIndex((section) => section.id === activeSectionId)
+    );
+    const next = sections[currentIndex + delta];
+    if (next) jumpToChapter(next.id);
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-      if (event.key.toLowerCase() === "c" && activeBook) {
-        event.preventDefault();
-        setChapterOpen(true);
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      switch (event.key) {
+        case "c":
+        case "C":
+          if (activeBook) {
+            event.preventDefault();
+            setChapterOpen(true);
+          }
+          break;
+        case "/":
+          event.preventDefault();
+          searchRef.current?.focus();
+          break;
+        case "b":
+        case "B":
+          event.preventDefault();
+          bookmarkHere();
+          break;
+        case "[":
+          event.preventDefault();
+          stepChapter(-1);
+          break;
+        case "]":
+          event.preventDefault();
+          stepChapter(1);
+          break;
+        case "?":
+          event.preventDefault();
+          setShortcutsOpen(true);
+          break;
+        default:
+          break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeBook]);
+  });
 
   const jumpToChapter = (id: string) => {
     setChapterOpen(false);
@@ -161,6 +303,16 @@ export function ReaderPage() {
     requestAnimationFrame(() => {
       const el = stageRef.current?.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
       el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const jumpToAnnotation = (annotation: Annotation) => {
+    if (viewMode !== "reader") setViewMode("reader");
+    requestAnimationFrame(() => {
+      const el = stageRef.current?.querySelector<HTMLElement>(
+        `[data-section-id="${CSS.escape(annotation.sectionId)}"][data-para="${annotation.paraIndex}"]`
+      );
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   };
 
@@ -187,6 +339,11 @@ export function ReaderPage() {
         onOpenChapters={() => setChapterOpen(true)}
         query={query}
         onQuery={setQuery}
+        matchCount={searchMatches.length}
+        activeMatchIndex={activeMatchIndex}
+        onNextMatch={() => stepMatch(1)}
+        onPrevMatch={() => stepMatch(-1)}
+        searchRef={searchRef}
       />
 
       <ReaderCanvas
@@ -198,10 +355,20 @@ export function ReaderPage() {
         widthMode={widthMode}
         viewMode={viewMode}
         pageTheme={pageTheme}
-        query={query}
+        searchMatches={searchMatches}
+        activeMatchIndex={activeMatchIndex}
+        annotations={annotations}
+        onHighlight={(drafts, color) => highlightMutation.mutate({ drafts, color })}
       />
 
-      <OutlineRail book={activeBook} activeSectionId={activeSectionId} onJump={jumpToChapter} />
+      <OutlineRail
+        book={activeBook}
+        activeSectionId={activeSectionId}
+        annotations={annotations}
+        onJump={jumpToChapter}
+        onJumpToAnnotation={jumpToAnnotation}
+        onDeleteAnnotation={(id) => deleteAnnotationMutation.mutate(id)}
+      />
 
       {chapterOpen && activeBook ? (
         <ChapterNav
@@ -211,6 +378,17 @@ export function ReaderPage() {
           onClose={() => setChapterOpen(false)}
         />
       ) : null}
+
+      {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
     </main>
   );
+}
+
+function topmostParagraph(stage: HTMLElement): HTMLElement | null {
+  const stageTop = stage.getBoundingClientRect().top;
+  const paragraphs = stage.querySelectorAll<HTMLElement>("[data-para]");
+  for (const paragraph of paragraphs) {
+    if (paragraph.getBoundingClientRect().bottom > stageTop + 12) return paragraph;
+  }
+  return null;
 }

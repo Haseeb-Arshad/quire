@@ -40,6 +40,18 @@
   gap: 8px;
 }
 
+.stats-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -8px 0 20px;
+}
+
+.stats-strip .pill {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 /* Dropzone hero */
 .dropzone {
   display: flex;

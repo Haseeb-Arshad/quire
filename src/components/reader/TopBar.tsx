@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Layers, Moon, Search, Sun } from "lucide-react";
-import type { ViewMode, WidthMode } from "../../lib/preferences";
+import { ArrowLeft, Layers, Moon, Sun } from "lucide-react";
+import type { PageTheme, ViewMode, WidthMode } from "../../lib/preferences";
 import { Segmented } from "../ui/Segmented";
 import { TypeMenu } from "./TypeMenu";
 import { ThemeMenu, type ThemeScope } from "./ThemeMenu";
+import { SearchBar } from "./SearchBar";
 import { useAppTheme } from "../../app/AppShell";
-import type { PageTheme } from "../../lib/preferences";
 
 export function TopBar(props: {
   title?: string;
@@ -28,6 +28,11 @@ export function TopBar(props: {
   onOpenChapters: () => void;
   query: string;
   onQuery: (value: string) => void;
+  matchCount: number;
+  activeMatchIndex: number;
+  onNextMatch: () => void;
+  onPrevMatch: () => void;
+  searchRef: React.RefObject<HTMLInputElement>;
 }) {
   const { appTheme, toggleAppTheme } = useAppTheme();
 
@@ -41,15 +46,15 @@ export function TopBar(props: {
         {props.author ? <span>· {props.author}</span> : null}
       </div>
 
-      <label className="search-box">
-        <Search size={15} />
-        <input
-          value={props.query}
-          onChange={(event) => props.onQuery(event.target.value)}
-          placeholder="Find in book"
-          aria-label="Find in book"
-        />
-      </label>
+      <SearchBar
+        ref={props.searchRef}
+        query={props.query}
+        onQuery={props.onQuery}
+        matchCount={props.matchCount}
+        activeIndex={props.activeMatchIndex}
+        onNext={props.onNextMatch}
+        onPrev={props.onPrevMatch}
+      />
 
       <div className="toolbar-group" aria-label="Reader controls">
         <button

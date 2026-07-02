@@ -6,6 +6,7 @@ import { createDemoBook, getBooks, importBook } from "../lib/library";
 import { getStat, loadStats } from "../lib/readingStats";
 import { BookCard } from "../components/library/BookCard";
 import { Dropzone } from "../components/library/Dropzone";
+import { StatsStrip } from "../components/library/StatsStrip";
 import { useAppTheme } from "./AppShell";
 
 export function LibraryPage() {
@@ -51,6 +52,8 @@ export function LibraryPage() {
             </button>
           </div>
         </header>
+
+        <StatsStrip books={books} stats={stats} />
 
         <Dropzone isWorking={isWorking} onFile={(file) => importMutation.mutate(file)} />
 

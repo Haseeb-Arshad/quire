@@ -1,10 +1,15 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { BookOpen, Files, Loader2 } from "lucide-react";
-import type { BookDocument } from "../../lib/types";
+import type { Annotation, BookDocument, HighlightColor } from "../../lib/types";
 import type { PageTheme, ViewMode, WidthMode } from "../../lib/preferences";
 import { fontStack } from "../../lib/fonts";
 import { getFileBlob } from "../../lib/library";
 import { useBlobUrl } from "../../lib/hooks";
+import { selectionToDrafts, type Decoration, type SelectionDraft } from "../../lib/anchors";
+import { resolveHighlightRange } from "../../lib/annotations";
+import type { SearchMatch } from "../../lib/search";
+import { EMPTY_DECORATIONS, Paragraph } from "./Paragraph";
+import { HighlightPopover } from "./HighlightPopover";
 
 const PdfPageView = lazy(() =>
   import("../pdf/PdfPageView").then((module) => ({ default: module.PdfPageView }))
@@ -19,7 +24,10 @@ export function ReaderCanvas(props: {
   widthMode: WidthMode;
   viewMode: ViewMode;
   pageTheme: PageTheme;
-  query: string;
+  searchMatches: SearchMatch[];
+  activeMatchIndex: number;
+  annotations: Annotation[];
+  onHighlight: (drafts: SelectionDraft[], color: HighlightColor) => void;
 }) {
   const fileUrl = useBlobUrl(
     props.book?.id,
@@ -27,18 +35,79 @@ export function ReaderCanvas(props: {
     getFileBlob
   );
 
-  const matches = useMemo(() => {
-    const search = props.query.trim().toLowerCase();
-    if (!props.book || !search) return new Set<string>();
-    const result = new Set<string>();
-    props.book.sections.forEach((section) => {
-      if (section.title.toLowerCase().includes(search)) result.add(section.id);
-      section.paragraphs.forEach((paragraph, index) => {
-        if (paragraph.toLowerCase().includes(search)) result.add(`${section.id}-${index}`);
+  const [popover, setPopover] = useState<{ drafts: SelectionDraft[]; x: number; y: number } | null>(
+    null
+  );
+
+  // Decorations per paragraph: search marks + persisted highlights.
+  const decoMap = useMemo(() => {
+    const map = new Map<string, Decoration[]>();
+    const push = (sectionId: string, paraIndex: number, decoration: Decoration) => {
+      const key = `${sectionId}|${paraIndex}`;
+      const list = map.get(key);
+      if (list) {
+        list.push(decoration);
+      } else {
+        map.set(key, [decoration]);
+      }
+    };
+
+    props.searchMatches.forEach((match, index) => {
+      push(match.sectionId, match.paraIndex, {
+        start: match.start,
+        end: match.end,
+        kind: index === props.activeMatchIndex ? "search-active" : "search"
       });
     });
-    return result;
-  }, [props.book, props.query]);
+
+    if (props.book) {
+      const sectionsById = new Map(props.book.sections.map((section) => [section.id, section]));
+      for (const annotation of props.annotations) {
+        if (annotation.kind !== "highlight") continue;
+        const text = sectionsById.get(annotation.sectionId)?.paragraphs[annotation.paraIndex];
+        if (text === undefined) continue;
+        const range = resolveHighlightRange(annotation, text);
+        if (!range) continue;
+        push(annotation.sectionId, annotation.paraIndex, {
+          start: range.start,
+          end: range.end,
+          kind: `hl-${annotation.color}`,
+          id: annotation.id
+        });
+      }
+    }
+    return map;
+  }, [props.book, props.annotations, props.searchMatches, props.activeMatchIndex]);
+
+  // Bring the active search match to the center of the stage.
+  useEffect(() => {
+    if (!props.searchMatches.length) return;
+    const stage = props.stageRef.current;
+    if (!stage) return;
+    const frame = requestAnimationFrame(() => {
+      stage.querySelector(".deco-search-active")?.scrollIntoView({ block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.activeMatchIndex, props.searchMatches, props.stageRef]);
+
+  const handleMouseUp = () => {
+    const stage = props.stageRef.current;
+    if (!stage) return;
+    const drafts = selectionToDrafts(stage);
+    if (!drafts.length) {
+      setPopover(null);
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    setPopover({ drafts, x: rect.left + rect.width / 2, y: rect.top - 8 });
+  };
+
+  const finishSelection = () => {
+    window.getSelection()?.removeAllRanges();
+    setPopover(null);
+  };
 
   if (props.isLoading && !props.book) {
     return (
@@ -95,7 +164,13 @@ export function ReaderCanvas(props: {
   }
 
   return (
-    <section className="reader-stage scroll-area" ref={props.stageRef}>
+    <section
+      className="reader-stage scroll-area"
+      ref={props.stageRef}
+      onMouseUp={handleMouseUp}
+      onMouseDown={() => setPopover(null)}
+      onScroll={() => popover && setPopover(null)}
+    >
       <article
         className={`document-page width-${props.widthMode}`}
         style={
@@ -141,41 +216,37 @@ export function ReaderCanvas(props: {
         </nav>
 
         {props.book.sections.map((section) => (
-          <section
-            key={section.id}
-            id={section.id}
-            className={matches.has(section.id) ? "book-section match" : "book-section"}
-          >
+          <section key={section.id} id={section.id} className="book-section">
             <h2>{section.title}</h2>
             {section.paragraphs.map((paragraph, index) => (
               <Paragraph
                 key={`${section.id}-${index}`}
                 text={paragraph}
-                isMatch={matches.has(`${section.id}-${index}`)}
+                sectionId={section.id}
+                paraIndex={index}
+                decorations={decoMap.get(`${section.id}|${index}`) || EMPTY_DECORATIONS}
               />
             ))}
           </section>
         ))}
       </article>
+
+      {popover ? (
+        <HighlightPopover
+          x={popover.x}
+          y={popover.y}
+          onPick={(color) => {
+            props.onHighlight(popover.drafts, color);
+            finishSelection();
+          }}
+          onCopy={() => {
+            void navigator.clipboard.writeText(popover.drafts.map((d) => d.quote).join("\n\n"));
+            finishSelection();
+          }}
+        />
+      ) : null}
     </section>
   );
-}
-
-// Render code-like blocks (indented listings, symbol soup) in a monospace box
-// so the reflowed view stops mangling figures and source listings into prose.
-function Paragraph({ text, isMatch }: { text: string; isMatch: boolean }) {
-  if (looksLikeCode(text)) {
-    return <pre className={isMatch ? "code-block match" : "code-block"}>{text}</pre>;
-  }
-  return <p className={isMatch ? "match" : undefined}>{text}</p>;
-}
-
-function looksLikeCode(text: string): boolean {
-  if (text.length > 600) return false;
-  const symbols = (text.match(/[{}();#\\/*=<>\[\]|~%]/g) || []).length;
-  const density = symbols / Math.max(text.length, 1);
-  const codeHints = /(printf|char\s+s\s*\[|main\s*\(|return\s*\(|for\s*\(|if\s*\()/.test(text);
-  return density > 0.06 && (codeHints || density > 0.12);
 }
 
 function formatNumber(value: number) {
