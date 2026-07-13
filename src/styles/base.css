@@ -121,6 +121,12 @@ h3 {
   background: var(--fill-active);
 }
 
+.icon-button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
 .tool-button {
   display: inline-flex;
   align-items: center;

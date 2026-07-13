@@ -29,6 +29,13 @@ const STRUCTURAL_OPENING_WORDS = /^(chapter|book|part|section|preface|contents|i
 
 const COVER_TINTS: CoverTint[] = ["peach", "sage", "sky", "lilac", "butter"];
 
+/**
+ * Bump when extraction output improves enough that stored books should be
+ * rebuilt from their original bytes (PDFs keep the original in IndexedDB).
+ * v2: layout-aware PDF extraction — real paragraphs, headings, lists, tables.
+ */
+export const STRUCTURE_VERSION = 2;
+
 export function buildBookDocument(input: BuildInput): BookDocument {
   const { extracted } = input;
   const normalizedText = normalizeText(extracted.text);
@@ -57,7 +64,8 @@ export function buildBookDocument(input: BuildInput): BookDocument {
     warnings: extracted.warnings,
     sections,
     hasOriginal: input.hasOriginal,
-    coverTint: pickCoverTint(input.id)
+    coverTint: pickCoverTint(input.id),
+    structureVersion: STRUCTURE_VERSION
   };
 }
 
@@ -421,7 +429,7 @@ export function decodeEntities(text: string): string {
   });
 }
 
-function slugify(value: string): string {
+export function slugify(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")

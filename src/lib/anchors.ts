@@ -70,6 +70,10 @@ export function selectionToDrafts(root: HTMLElement): SelectionDraft[] {
   const paragraphs = root.querySelectorAll<HTMLElement>("[data-para]");
   paragraphs.forEach((element) => {
     if (!range.intersectsNode(element)) return;
+    // Tables render extra DOM (cells, separators are CSS-only), so their
+    // textContent no longer matches the stored block text — offsets computed
+    // here would corrupt the anchor. Skip them; cells are still copyable.
+    if (element.dataset.block === "table") return;
     const sectionId = element.dataset.sectionId;
     const paraIndex = Number(element.dataset.para);
     const text = element.textContent || "";

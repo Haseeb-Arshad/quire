@@ -3,8 +3,9 @@
 // stay familiar.
 
 import type { BookDocument, BookSummary } from "./types";
-import { getDb } from "./db";
+import { getDb, type Database } from "./db";
 import { extractFromFile } from "./extraction";
+import { STRUCTURE_VERSION } from "./extraction/structure";
 import { removeBookPrefs } from "./preferences";
 import { removeStats } from "./readingStats";
 
@@ -20,7 +21,39 @@ export async function getBook(id: string): Promise<BookDocument> {
   if (!summary || !contents) {
     throw new Error("This book is no longer in your library.");
   }
+
+  // PDFs imported before layout-aware extraction keep their original bytes, so
+  // rebuild them once with the current pipeline (real paragraphs, tables, TOC).
+  if (summary.sourceKind === "pdf" && (summary.structureVersion ?? 1) < STRUCTURE_VERSION) {
+    const rebuilt = await restructureBook(db, summary);
+    if (rebuilt) return rebuilt;
+  }
+
   return { ...summary, sections: contents.sections, rawSample: contents.rawSample };
+}
+
+async function restructureBook(db: Database, summary: BookSummary): Promise<BookDocument | null> {
+  try {
+    const stored = await db.get("files", summary.id);
+    if (!stored) return null;
+    const file = new File([stored.blob], stored.name || summary.fileName, {
+      type: stored.type || "application/pdf"
+    });
+    const { book, cover } = await extractFromFile(file, summary.id, summary.uploadedAt);
+    // Preserve a user-chosen title over the re-inferred one.
+    const kept: BookDocument = { ...book, title: summary.title || book.title };
+    const tx = db.transaction(["books", "contents", "covers"], "readwrite");
+    await Promise.all([
+      tx.objectStore("books").put(summarize(kept)),
+      tx.objectStore("contents").put({ id: kept.id, sections: kept.sections, rawSample: kept.rawSample }),
+      cover ? tx.objectStore("covers").put({ id: kept.id, blob: cover }) : Promise.resolve(undefined)
+    ]);
+    await tx.done;
+    return kept;
+  } catch {
+    // Never block reading on a failed rebuild — the stored structure still works.
+    return null;
+  }
 }
 
 export async function importBook(file: File): Promise<BookDocument> {

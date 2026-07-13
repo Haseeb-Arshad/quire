@@ -20,6 +20,7 @@ export interface GlobalPrefs {
   widthMode: WidthMode;
   pageTheme: PageTheme;
   appTheme: AppTheme;
+  railOpen: boolean;
 }
 
 export interface BookPrefs extends Partial<GlobalPrefs> {
@@ -38,8 +39,9 @@ export const DEFAULT_GLOBAL_PREFS: GlobalPrefs = {
   fontId: DEFAULT_FONT_ID,
   fontSize: 19,
   widthMode: "standard",
-  pageTheme: "paper",
-  appTheme: "light"
+  pageTheme: "white",
+  appTheme: "light",
+  railOpen: true
 };
 
 let cache: Prefs | null = null;

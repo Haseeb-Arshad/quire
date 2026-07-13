@@ -1,31 +1,21 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Layers, Moon, Sun } from "lucide-react";
-import type { PageTheme, ViewMode, WidthMode } from "../../lib/preferences";
+import { ArrowLeft, Layers, Moon, PanelRight, Sun } from "lucide-react";
+import type { ViewMode } from "../../lib/preferences";
 import { Segmented } from "../ui/Segmented";
-import { TypeMenu } from "./TypeMenu";
-import { ThemeMenu, type ThemeScope } from "./ThemeMenu";
 import { SearchBar } from "./SearchBar";
 import { useAppTheme } from "../../app/AppShell";
 
 export function TopBar(props: {
   title?: string;
   author?: string;
-  fontSize: number;
-  fontId: string;
-  widthMode: WidthMode;
-  pageTheme: PageTheme;
   viewMode: ViewMode;
   hasOriginal: boolean;
   canNavigate: boolean;
   progress: number;
-  onFontSize: (value: number) => void;
-  onFontId: (value: string) => void;
-  onWidthMode: (value: WidthMode) => void;
-  onPageTheme: (value: PageTheme) => void;
-  themeScope: ThemeScope;
-  onThemeScope: (scope: ThemeScope) => void;
   onViewMode: (value: ViewMode) => void;
   onOpenChapters: () => void;
+  railOpen: boolean;
+  onToggleRail: () => void;
   query: string;
   onQuery: (value: string) => void;
   matchCount: number;
@@ -80,23 +70,6 @@ export function TopBar(props: {
           />
         ) : null}
 
-        <TypeMenu
-          fontId={props.fontId}
-          fontSize={props.fontSize}
-          widthMode={props.widthMode}
-          onFontId={props.onFontId}
-          onFontSize={props.onFontSize}
-          onWidthMode={props.onWidthMode}
-        />
-
-        <ThemeMenu
-          pageTheme={props.pageTheme}
-          onPageTheme={props.onPageTheme}
-          themeScope={props.themeScope}
-          onThemeScope={props.onThemeScope}
-          canScopeToBook={props.canNavigate}
-        />
-
         <button
           className="icon-button"
           type="button"
@@ -104,6 +77,16 @@ export function TopBar(props: {
           title={appTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
           {appTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+
+        <button
+          className={"icon-button" + (props.railOpen ? " active" : "")}
+          type="button"
+          onClick={props.onToggleRail}
+          title={props.railOpen ? "Collapse sidebar" : "Show outline & appearance"}
+          aria-pressed={props.railOpen}
+        >
+          <PanelRight size={16} />
         </button>
       </div>
 

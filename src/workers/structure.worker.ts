@@ -1,7 +1,7 @@
 // Structuring worker: runs the heavy regex/string passes off the main thread.
-// Non-PDF formats are handled end-to-end here (jszip works in workers); PDFs
-// extract text on the main thread (pdf.js has its own worker — nesting workers
-// is a Safari/bundler footgun) and only the sectioning pass happens here.
+// Non-PDF formats are handled end-to-end here (jszip works in workers). PDFs
+// never come through this worker anymore — layout-aware extraction needs the
+// pdf.js document and happens in extraction/pdfText.ts.
 
 import JSZip from "jszip";
 import {
@@ -30,18 +30,7 @@ export interface ExtractRequest {
   bytes: ArrayBuffer;
 }
 
-export interface StructurePdfRequest {
-  id: number;
-  kind: "structure-pdf";
-  bookId: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  uploadedAt: string;
-  extracted: ExtractedText;
-}
-
-export type WorkerRequest = ExtractRequest | StructurePdfRequest;
+export type WorkerRequest = ExtractRequest;
 
 export type WorkerResponse =
   | { id: number; ok: true; book: BookDocument; cover?: { bytes: ArrayBuffer; type: string } }
@@ -60,19 +49,6 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 };
 
 async function handle(request: WorkerRequest): Promise<WorkerResponse> {
-  if (request.kind === "structure-pdf") {
-    const book = buildBookDocument({
-      id: request.bookId,
-      fileName: request.fileName,
-      mimeType: request.mimeType,
-      sizeBytes: request.sizeBytes,
-      uploadedAt: request.uploadedAt,
-      extracted: request.extracted,
-      hasOriginal: true
-    });
-    return { id: request.id, ok: true, book };
-  }
-
   const sourceKind = detectSourceKind(request.fileName, request.mimeType);
   let extracted: ExtractedText;
   let cover: { bytes: ArrayBuffer; type: string } | undefined;

@@ -35,6 +35,7 @@ export function ReaderPage() {
     loadPrefs().perBook[bookId]?.pageTheme ? "book" : "global"
   );
   const [viewMode, setViewMode] = useState<ViewMode>("reader");
+  const [railOpen, setRailOpen] = useState(() => loadPrefs().global.railOpen);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -116,6 +117,14 @@ export function ReaderPage() {
     } else {
       updateGlobalPrefs({ pageTheme: theme });
     }
+  };
+
+  const toggleRail = () => {
+    setRailOpen((open) => {
+      const next = !open;
+      updateGlobalPrefs({ railOpen: next });
+      return next;
+    });
   };
 
   const onThemeScope = (scope: ThemeScope) => {
@@ -317,26 +326,18 @@ export function ReaderPage() {
   };
 
   return (
-    <main className="reader-shell" data-page-theme={pageTheme}>
+    <main className="reader-shell" data-page-theme={pageTheme} data-rail={railOpen ? "open" : "closed"}>
       <TopBar
         title={activeBook?.title}
         author={activeBook?.author}
-        fontSize={fontSize}
-        fontId={fontId}
-        widthMode={widthMode}
-        pageTheme={pageTheme}
         viewMode={viewMode}
         hasOriginal={Boolean(activeBook?.hasOriginal)}
         canNavigate={Boolean(activeBook)}
         progress={liveProgress}
-        onFontSize={setFontSize}
-        onFontId={setFontId}
-        onWidthMode={setWidthMode}
-        onPageTheme={onPageTheme}
-        themeScope={themeScope}
-        onThemeScope={onThemeScope}
         onViewMode={setViewMode}
         onOpenChapters={() => setChapterOpen(true)}
+        railOpen={railOpen}
+        onToggleRail={toggleRail}
         query={query}
         onQuery={setQuery}
         matchCount={searchMatches.length}
@@ -361,14 +362,27 @@ export function ReaderPage() {
         onHighlight={(drafts, color) => highlightMutation.mutate({ drafts, color })}
       />
 
-      <OutlineRail
-        book={activeBook}
-        activeSectionId={activeSectionId}
-        annotations={annotations}
-        onJump={jumpToChapter}
-        onJumpToAnnotation={jumpToAnnotation}
-        onDeleteAnnotation={(id) => deleteAnnotationMutation.mutate(id)}
-      />
+      {railOpen ? (
+        <OutlineRail
+          book={activeBook}
+          activeSectionId={activeSectionId}
+          annotations={annotations}
+          onJump={jumpToChapter}
+          onJumpToAnnotation={jumpToAnnotation}
+          onDeleteAnnotation={(id) => deleteAnnotationMutation.mutate(id)}
+          onClose={toggleRail}
+          fontId={fontId}
+          fontSize={fontSize}
+          widthMode={widthMode}
+          onFontId={setFontId}
+          onFontSize={setFontSize}
+          onWidthMode={setWidthMode}
+          pageTheme={pageTheme}
+          onPageTheme={onPageTheme}
+          themeScope={themeScope}
+          onThemeScope={onThemeScope}
+        />
+      ) : null}
 
       {chapterOpen && activeBook ? (
         <ChapterNav

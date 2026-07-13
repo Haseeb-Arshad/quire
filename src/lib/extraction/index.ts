@@ -6,7 +6,7 @@
 import type { BookDocument } from "../types";
 import { detectSourceKind, pickCoverTint } from "./structure";
 import { generateTypographicCover, renderPdfCover } from "./covers";
-import type { ExtractRequest, StructurePdfRequest, WorkerResponse } from "../../workers/structure.worker";
+import type { ExtractRequest, WorkerResponse } from "../../workers/structure.worker";
 
 export interface ImportResult {
   book: BookDocument;
@@ -26,16 +26,13 @@ export async function extractFromFile(file: File, id: string, uploadedAt: string
   };
 
   if (sourceKind === "pdf") {
-    const { extractPdfText } = await import("./pdfText");
+    const { extractPdfBook } = await import("./pdfText");
     // pdf.js transfers (detaches) the buffer it is given, so hand it a copy;
     // the File blob itself is stored untouched in IndexedDB.
-    const { extracted, doc } = await extractPdfText(await file.arrayBuffer());
-    const [response, cover] = await Promise.all([
-      callWorker({ ...base, kind: "structure-pdf", extracted }),
-      renderPdfCover(doc)
-    ]);
+    const { book, doc } = await extractPdfBook(await file.arrayBuffer(), base);
+    const cover = await renderPdfCover(doc);
     void doc.destroy();
-    return { book: response.book, original: file, cover: cover || undefined };
+    return { book, original: file, cover: cover || undefined };
   }
 
   const bytes = await file.arrayBuffer();
@@ -85,7 +82,7 @@ function getWorker(): Worker {
 }
 
 function callWorker(
-  request: Omit<ExtractRequest, "id"> | Omit<StructurePdfRequest, "id">,
+  request: Omit<ExtractRequest, "id">,
   transfer: Transferable[] = []
 ): Promise<SuccessResponse> {
   const id = nextRequestId++;

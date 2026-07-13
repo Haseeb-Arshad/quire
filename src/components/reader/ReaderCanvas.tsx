@@ -109,13 +109,19 @@ export function ReaderCanvas(props: {
     setPopover(null);
   };
 
+  const scrollToContent = () => {
+    props.stageRef.current
+      ?.querySelector(".book-section")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   if (props.isLoading && !props.book) {
     return (
       <section className="reader-stage scroll-area" ref={props.stageRef}>
         <div className="reader-empty">
           <Loader2 className="spin" size={30} />
           <strong>Opening your book</strong>
-          <span>Joining broken lines and building the section outline.</span>
+          <span>Reading the layout — paragraphs, headings and tables.</span>
         </div>
       </section>
     );
@@ -180,40 +186,13 @@ export function ReaderCanvas(props: {
           } as React.CSSProperties
         }
       >
-        <header className="book-masthead">
-          <p>{props.book.sourceKind.toUpperCase()} · reflowed for reading</p>
-          <h1>{props.book.title}</h1>
-          {props.book.author ? <span>by {props.book.author}</span> : null}
-          <dl>
-            <div>
-              <dt>Source</dt>
-              <dd>{props.book.fileName}</dd>
-            </div>
-            <div>
-              <dt>Added</dt>
-              <dd>{formatDate(props.book.uploadedAt)}</dd>
-            </div>
-            <div>
-              <dt>Words</dt>
-              <dd>{formatNumber(props.book.wordCount)}</dd>
-            </div>
-            <div>
-              <dt>Sections</dt>
-              <dd>{formatNumber(props.book.sectionCount)}</dd>
-            </div>
-          </dl>
-        </header>
-
-        <nav className="inline-toc" aria-label="Table of contents">
-          <h3>Contents</h3>
-          <ol>
-            {props.book.sections.slice(0, 18).map((section) => (
-              <li key={section.id}>
-                <a href={`#${section.id}`}>{section.title}</a>
-              </li>
-            ))}
-          </ol>
-        </nav>
+        <section className="book-cover">
+          {props.book.author ? <p className="book-cover-author">{props.book.author}</p> : null}
+          <h1 className="book-cover-title">{props.book.title}</h1>
+          <button type="button" className="book-cover-begin" onClick={scrollToContent}>
+            begin
+          </button>
+        </section>
 
         {props.book.sections.map((section) => (
           <section key={section.id} id={section.id} className="book-section">
@@ -222,6 +201,7 @@ export function ReaderCanvas(props: {
               <Paragraph
                 key={`${section.id}-${index}`}
                 text={paragraph}
+                block={section.blocks?.[index]}
                 sectionId={section.id}
                 paraIndex={index}
                 decorations={decoMap.get(`${section.id}|${index}`) || EMPTY_DECORATIONS}
@@ -246,15 +226,5 @@ export function ReaderCanvas(props: {
         />
       ) : null}
     </section>
-  );
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("en").format(value);
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" }).format(
-    new Date(value)
   );
 }

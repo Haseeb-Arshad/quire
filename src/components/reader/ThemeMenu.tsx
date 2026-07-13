@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from "react";
-import { Palette } from "lucide-react";
 import type { PageTheme } from "../../lib/preferences";
 
 interface ThemeOption {
@@ -21,82 +19,53 @@ export const PAGE_THEMES: ThemeOption[] = [
 
 export type ThemeScope = "global" | "book";
 
-export function ThemeMenu(props: {
+// Presentational panel — page-theme swatches + scope toggle, embedded
+// directly in the sidebar's Appearance tab (no popover chrome of its own).
+export function ThemePanel(props: {
   pageTheme: PageTheme;
   onPageTheme: (value: PageTheme) => void;
   themeScope: ThemeScope;
   onThemeScope: (scope: ThemeScope) => void;
   canScopeToBook: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onClick);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onClick);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div className="type-menu" ref={ref}>
-      <button
-        className="icon-button"
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title="Page theme (T)"
-        aria-label="Page theme"
-      >
-        <Palette size={16} />
-      </button>
+    <>
+      <div className="type-section">
+        <div className="type-label">Page theme</div>
+        <div className="theme-swatches">
+          {PAGE_THEMES.map((theme) => (
+            <button
+              key={theme.id}
+              type="button"
+              className={"theme-swatch" + (theme.id === props.pageTheme ? " active" : "")}
+              title={theme.hint}
+              onClick={() => props.onPageTheme(theme.id)}
+            >
+              <span
+                className="theme-swatch-chip"
+                style={{ background: theme.bg, color: theme.ink }}
+                aria-hidden
+              >
+                Ag
+              </span>
+              <span>{theme.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {open ? (
-        <div className="type-popover scroll-area" role="menu" style={{ width: 300 }}>
-          <div className="type-section">
-            <div className="type-label">Page theme</div>
-            <div className="theme-swatches">
-              {PAGE_THEMES.map((theme) => (
-                <button
-                  key={theme.id}
-                  type="button"
-                  className={"theme-swatch" + (theme.id === props.pageTheme ? " active" : "")}
-                  title={theme.hint}
-                  onClick={() => props.onPageTheme(theme.id)}
-                >
-                  <span
-                    className="theme-swatch-chip"
-                    style={{ background: theme.bg, color: theme.ink }}
-                    aria-hidden
-                  >
-                    Ag
-                  </span>
-                  <span>{theme.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {props.canScopeToBook ? (
-            <div className="type-section">
-              <label className="theme-scope">
-                <input
-                  type="checkbox"
-                  checked={props.themeScope === "book"}
-                  onChange={(event) => props.onThemeScope(event.target.checked ? "book" : "global")}
-                />
-                <span>Only for this book</span>
-              </label>
-            </div>
-          ) : null}
+      {props.canScopeToBook ? (
+        <div className="type-section">
+          <label className="theme-scope">
+            <input
+              type="checkbox"
+              checked={props.themeScope === "book"}
+              onChange={(event) => props.onThemeScope(event.target.checked ? "book" : "global")}
+            />
+            <span>Only for this book</span>
+          </label>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

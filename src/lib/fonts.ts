@@ -1,5 +1,5 @@
 // Curated reading fonts — the kind top magazines and blog agencies actually set
-// their long-form text in. Times New Roman is the global default, per request.
+// their long-form text in. Georgia is the global default, per request.
 // System fonts need no download; the Google families are loaded in index.html.
 
 export interface ReadingFont {
@@ -104,7 +104,7 @@ export const READING_FONTS: ReadingFont[] = [
   }
 ];
 
-export const DEFAULT_FONT_ID = "times";
+export const DEFAULT_FONT_ID = "georgia";
 
 export function fontStack(id: string): string {
   return (READING_FONTS.find((font) => font.id === id) || READING_FONTS[0]).stack;
