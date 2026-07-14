@@ -57,16 +57,14 @@
   opacity: 1;
 }
 
-.pdf-canvas-btn {
+.pdf-canvas-wrap {
   position: relative;
   display: block;
   width: 100%;
-  padding: 0;
   border: 1px solid var(--reader-border);
   border-radius: var(--radius-sm);
   background: var(--reader-bg);
   overflow: hidden;
-  cursor: zoom-in;
 }
 
 /* Theme filters are baked into the bitmap at render time (lib/pdfFilters.ts),
@@ -74,7 +72,128 @@
 .pdf-canvas {
   display: block;
   width: 100%;
-  aspect-ratio: 0.773; /* letter-ish placeholder until the real page reports */
+  /* Real ratio measured from page 1; letter-ish until the document reports. */
+  aspect-ratio: var(--pdf-aspect, 0.773);
+}
+
+/* Selectable text overlay (pdf.js TextLayer). Spans are positioned by the
+   library using --scale-factor; we only make them invisible and selectable. */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  line-height: 1;
+  cursor: text;
+}
+
+.pdf-text-layer span,
+.pdf-text-layer br {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0 0;
+}
+
+.pdf-text-layer ::selection {
+  background: rgba(96, 140, 220, 0.35);
+}
+
+/* Stored page highlights, re-projected from page-fraction coords. */
+.pdf-annot-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-annot-rect {
+  position: absolute;
+  border-radius: 1px;
+  mix-blend-mode: multiply;
+}
+
+[data-page-theme="night"] .pdf-annot-rect,
+[data-page-theme="focus"] .pdf-annot-rect {
+  mix-blend-mode: screen;
+}
+
+.hl-fill-amber { background: rgba(255, 200, 60, 0.42); }
+.hl-fill-sage { background: rgba(140, 190, 130, 0.44); }
+.hl-fill-sky { background: rgba(120, 185, 225, 0.42); }
+.hl-fill-rose { background: rgba(242, 145, 160, 0.42); }
+
+.pdf-annot-chip {
+  position: absolute;
+  z-index: 3;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* Note/delete menu for a page highlight */
+.page-annot-menu {
+  position: fixed;
+  z-index: 60;
+  width: 264px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-3);
+}
+
+.page-annot-quote {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--text-subtle);
+}
+
+.page-annot-menu textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-default);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.page-annot-menu textarea:focus {
+  outline: none;
+  border-color: var(--border-active);
+}
+
+.page-annot-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-annot-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+.page-annot-delete:hover {
+  background: var(--fill-hover);
+  color: var(--text-strong);
 }
 
 .pdf-canvas-skeleton {

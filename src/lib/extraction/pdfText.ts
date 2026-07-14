@@ -5,6 +5,7 @@
 // and search/highlights anchor to it directly.
 
 import { pdfjsLib, type PDFDocumentProxy } from "../pdf";
+import type { StoredImage } from "../db";
 import type { BookDocument, BookSection, ContentBlock } from "../types";
 import {
   STRUCTURE_VERSION,
@@ -26,6 +27,8 @@ export interface PdfImportBase {
 
 export interface PdfBookResult {
   book: BookDocument;
+  /** Figure bitmaps to persist alongside the book (ids already book-prefixed). */
+  images: StoredImage[];
   /** Still-open document so the caller can render a cover from page 1. Caller must destroy(). */
   doc: PDFDocumentProxy;
 }
@@ -45,7 +48,7 @@ export async function extractPdfBook(data: ArrayBuffer, base: PdfImportBase): Pr
     /* metadata is optional */
   }
 
-  const blocks = cleanBlocks(layout.blocks);
+  const blocks = cleanBlocks(layout.blocks, base.bookId);
   const inferredTitle = title || inferTitleFromBlocks(blocks) || fileNameTitle(base.fileName);
   const sections = blocks.length
     ? buildSections(blocks, layout.outline, inferredTitle)
@@ -85,20 +88,44 @@ export async function extractPdfBook(data: ArrayBuffer, base: PdfImportBase): Pr
     structureVersion: STRUCTURE_VERSION
   };
 
-  return { book, doc };
+  const images: StoredImage[] = layout.figures.map((figure) => ({
+    id: `${base.bookId}:${figure.key}`,
+    bookId: base.bookId,
+    blob: figure.blob,
+    width: figure.width,
+    height: figure.height
+  }));
+
+  return { book, images, doc };
 }
 
 /* ------------------------------------------------------------------ */
 /* Block cleanup                                                       */
 /* ------------------------------------------------------------------ */
 
-function cleanBlocks(blocks: PdfBlock[]): PdfBlock[] {
+function cleanBlocks(blocks: PdfBlock[], bookId: string): PdfBlock[] {
   const cleaned: PdfBlock[] = [];
   for (const entry of blocks) {
     const block = entry.block;
     if (block.kind === "code" || block.kind === "table") {
       // Newlines are structural here; cells were cleaned during assembly.
       if (block.text.trim().length > 1) cleaned.push(entry);
+      continue;
+    }
+    if (block.kind === "figure") {
+      // Caption/placeholder cleans like prose; the layout key becomes the
+      // book-scoped id the images store was written under.
+      const text = cleanDisplayText(block.text);
+      if (text.length <= 1) continue;
+      cleaned.push({
+        ...entry,
+        block: {
+          ...block,
+          text,
+          imageId: `${bookId}:${block.imageId}`,
+          ...(block.caption ? { caption: cleanDisplayText(block.caption) } : {})
+        }
+      });
       continue;
     }
     const text = cleanDisplayText(block.text);
@@ -234,15 +261,22 @@ function makeSection(position: number, title: string, level: number, entries: Pd
 /* ------------------------------------------------------------------ */
 
 function inferTitleFromBlocks(blocks: PdfBlock[]): string | undefined {
-  const early = blocks.slice(0, 12);
-  const heading = early.find(
-    (entry) => entry.block.kind === "heading" && entry.block.text.length >= 4 && entry.block.text.length <= 120
-  );
-  if (heading) return heading.block.text;
-  const paragraph = early.find(
-    (entry) => entry.block.kind === "paragraph" && entry.block.text.length >= 4 && entry.block.text.length <= 110
-  );
-  return paragraph?.block.text;
+  // The title is almost always the largest type on the opening pages — front
+  // matter (copyright lines, watermarks) reads in the body face.
+  const early = blocks
+    .slice(0, 12)
+    .filter(
+      (entry) =>
+        (entry.block.kind === "heading" || entry.block.kind === "paragraph") &&
+        entry.block.text.length >= 4 &&
+        entry.block.text.length <= 120
+    );
+  if (!early.length) return undefined;
+  const largest = early.reduce((best, entry) => (entry.size > best.size ? entry : best));
+  if (largest.block.kind === "heading" || largest.size >= (early[0]?.size ?? 0) * 1.15) {
+    return largest.block.text;
+  }
+  return early.find((entry) => entry.block.kind === "heading")?.block.text || largest.block.text;
 }
 
 function fileNameTitle(fileName: string): string {

@@ -7,11 +7,15 @@ export type WidthMode = "narrow" | "standard" | "wide";
 export type PageTheme = "white" | "paper" | "sepia" | "grey" | "night" | "focus";
 export type AppTheme = "light" | "dark";
 export type ViewMode = "reader" | "original";
+/** "paged" shows one chapter per page; "scroll" is one continuous flow. */
+export type FlowMode = "paged" | "scroll";
 
 export interface ResumePoint {
   sectionId?: string;
   paraIndex?: number;
   ratio: number;
+  /** Last visible page in the original-pages view (1-based). */
+  page?: number;
 }
 
 export interface GlobalPrefs {
@@ -20,7 +24,9 @@ export interface GlobalPrefs {
   widthMode: WidthMode;
   pageTheme: PageTheme;
   appTheme: AppTheme;
-  railOpen: boolean;
+  flowMode: FlowMode;
+  leftRailOpen: boolean;
+  rightRailOpen: boolean;
 }
 
 export interface BookPrefs extends Partial<GlobalPrefs> {
@@ -41,7 +47,9 @@ export const DEFAULT_GLOBAL_PREFS: GlobalPrefs = {
   widthMode: "standard",
   pageTheme: "white",
   appTheme: "light",
-  railOpen: true
+  flowMode: "paged",
+  leftRailOpen: false,
+  rightRailOpen: false
 };
 
 let cache: Prefs | null = null;

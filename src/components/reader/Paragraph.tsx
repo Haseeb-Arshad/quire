@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { ContentBlock } from "../../lib/types";
 import { segmentText, type Decoration } from "../../lib/anchors";
+import { FigureImage } from "./FigureImage";
 
 export const EMPTY_DECORATIONS: Decoration[] = [];
 
@@ -34,6 +35,20 @@ export const Paragraph = memo(function Paragraph({
   }
 
   const content = renderRuns(text, decorations);
+
+  if (block?.kind === "figure") {
+    // The figcaption carries the canonical block text (caption or placeholder)
+    // so search marks and highlights anchor exactly; the img contributes no
+    // text content, keeping the DOM text equal to paragraphs[paraIndex].
+    return (
+      <figure className="book-figure" {...anchor}>
+        <FigureImage imageId={block.imageId} width={block.width} height={block.height} alt={text} />
+        <figcaption className={block.caption ? "figure-caption" : "figure-plate-label"}>
+          {content}
+        </figcaption>
+      </figure>
+    );
+  }
 
   if (block?.kind === "heading") {
     if (block.level === 1) return <h3 className="book-h1" {...anchor}>{content}</h3>;

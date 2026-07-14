@@ -1,8 +1,15 @@
 // Highlight + bookmark persistence (IndexedDB `annotations` store).
 
-import type { Annotation, Bookmark, Highlight, HighlightColor } from "./types";
+import type {
+  Annotation,
+  Bookmark,
+  Highlight,
+  HighlightColor,
+  PageBookmark,
+  PageHighlight
+} from "./types";
 import { getDb } from "./db";
-import type { SelectionDraft } from "./anchors";
+import type { PageSelectionDraft, SelectionDraft } from "./anchors";
 
 export async function getAnnotations(bookId: string): Promise<Annotation[]> {
   const db = await getDb();
@@ -52,6 +59,49 @@ export async function addBookmark(
   };
   await db.put("annotations", bookmark);
   return bookmark;
+}
+
+export async function addPageHighlights(
+  bookId: string,
+  drafts: PageSelectionDraft[],
+  color: HighlightColor
+): Promise<PageHighlight[]> {
+  const db = await getDb();
+  const created = drafts.map<PageHighlight>((draft) => ({
+    kind: "page-highlight",
+    id: crypto.randomUUID(),
+    bookId,
+    page: draft.page,
+    rects: draft.rects,
+    quote: draft.quote,
+    color,
+    createdAt: Date.now()
+  }));
+  const tx = db.transaction("annotations", "readwrite");
+  await Promise.all(created.map((highlight) => tx.store.put(highlight)));
+  await tx.done;
+  return created;
+}
+
+export async function addPageBookmark(bookId: string, page: number, label: string): Promise<PageBookmark> {
+  const db = await getDb();
+  const bookmark: PageBookmark = {
+    kind: "page-bookmark",
+    id: crypto.randomUUID(),
+    bookId,
+    page,
+    label,
+    createdAt: Date.now()
+  };
+  await db.put("annotations", bookmark);
+  return bookmark;
+}
+
+export async function updateAnnotationNote(id: string, note: string): Promise<void> {
+  const db = await getDb();
+  const annotation = await db.get("annotations", id);
+  if (!annotation || (annotation.kind !== "highlight" && annotation.kind !== "page-highlight")) return;
+  await db.put("annotations", { ...annotation, note: note.trim() || undefined });
 }
 
 export async function deleteAnnotation(id: string): Promise<void> {

@@ -33,8 +33,9 @@ const COVER_TINTS: CoverTint[] = ["peach", "sage", "sky", "lilac", "butter"];
  * Bump when extraction output improves enough that stored books should be
  * rebuilt from their original bytes (PDFs keep the original in IndexedDB).
  * v2: layout-aware PDF extraction — real paragraphs, headings, lists, tables.
+ * v3: recursive n-column layouts (newspapers) + embedded figures with captions.
  */
-export const STRUCTURE_VERSION = 2;
+export const STRUCTURE_VERSION = 3;
 
 export function buildBookDocument(input: BuildInput): BookDocument {
   const { extracted } = input;

@@ -102,7 +102,7 @@ function wrapText(
   lines.forEach((entry, index) => context.fillText(entry, x, y + index * lineHeight, maxWidth));
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+export function canvasToBlob(canvas: HTMLCanvasElement, quality = 0.82): Promise<Blob | null> {
   return new Promise((resolve) => {
     canvas.toBlob(
       (webp) => {
@@ -114,7 +114,7 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
         canvas.toBlob((jpeg) => resolve(jpeg), "image/jpeg", 0.85);
       },
       "image/webp",
-      0.82
+      quality
     );
   });
 }

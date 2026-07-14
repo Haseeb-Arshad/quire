@@ -3,6 +3,7 @@
 // pulled on the main thread (pdf.js runs its own worker); all regex-heavy
 // structuring happens in structure.worker.ts.
 
+import type { StoredImage } from "../db";
 import type { BookDocument } from "../types";
 import { detectSourceKind, pickCoverTint } from "./structure";
 import { generateTypographicCover, renderPdfCover } from "./covers";
@@ -13,6 +14,8 @@ export interface ImportResult {
   /** Original file bytes worth keeping (PDFs, for the page view). */
   original?: Blob;
   cover?: Blob;
+  /** Figure bitmaps referenced by figure blocks (PDFs only). */
+  images?: StoredImage[];
 }
 
 export async function extractFromFile(file: File, id: string, uploadedAt: string): Promise<ImportResult> {
@@ -29,10 +32,10 @@ export async function extractFromFile(file: File, id: string, uploadedAt: string
     const { extractPdfBook } = await import("./pdfText");
     // pdf.js transfers (detaches) the buffer it is given, so hand it a copy;
     // the File blob itself is stored untouched in IndexedDB.
-    const { book, doc } = await extractPdfBook(await file.arrayBuffer(), base);
+    const { book, images, doc } = await extractPdfBook(await file.arrayBuffer(), base);
     const cover = await renderPdfCover(doc);
     void doc.destroy();
-    return { book, original: file, cover: cover || undefined };
+    return { book, original: file, cover: cover || undefined, images };
   }
 
   const bytes = await file.arrayBuffer();

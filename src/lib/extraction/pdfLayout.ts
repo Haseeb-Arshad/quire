@@ -5,15 +5,18 @@
 //
 //   items → lines (baseline clustering)
 //         → page furniture removal (running heads, page numbers)
-//         → column regions (gutter detection for two-column layouts)
-//         → blocks: headings, list items, code, tables, paragraphs
+//         → column regions (recursive gutter detection, up to 4 columns)
+//         → embedded figures (CTM-tracked image placements, cropped + stored)
+//         → blocks: headings, list items, code, tables, figures, paragraphs
 //         → cross-page paragraph stitching
 //
 // Everything below `extractPdfLayout` is pure geometry/string work so it can
 // be unit-tested without pdf.js.
 
-import type { PDFDocumentProxy } from "../pdf";
+import { OPS, Util } from "../pdf";
+import type { PDFDocumentProxy, PDFPageProxy } from "../pdf";
 import type { ContentBlock } from "../types";
+import { canvasToBlob } from "./covers";
 
 /* ------------------------------------------------------------------ */
 /* Public shapes                                                       */
@@ -32,9 +35,19 @@ export interface PdfOutlineEntry {
   page: number;
 }
 
+/** A cropped, encoded figure ready for the images store (key is book-relative). */
+export interface ExtractedFigure {
+  key: string;
+  page: number;
+  blob: Blob;
+  width: number;
+  height: number;
+}
+
 export interface PdfLayoutResult {
   blocks: PdfBlock[];
   outline: PdfOutlineEntry[];
+  figures: ExtractedFigure[];
   warnings: string[];
 }
 
@@ -82,6 +95,7 @@ export async function extractPdfLayout(doc: PDFDocumentProxy): Promise<PdfLayout
   const warnings: string[] = [];
   const pageLines: Line[][] = [];
   const geometries: PageGeometry[] = [];
+  const pagePlacements: ImagePlacement[][] = [];
 
   for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
     const page = await doc.getPage(pageNumber);
@@ -106,17 +120,23 @@ export async function extractPdfLayout(doc: PDFDocumentProxy): Promise<PdfLayout
 
     pageLines.push(buildLines(spans, pageNumber - 1));
     geometries.push({ width: viewport.width, height: viewport.height });
+    pagePlacements.push(await collectImagePlacements(page, viewport));
     page.cleanup();
   }
 
   stripPageFurniture(pageLines, geometries);
 
   const bodySize = findBodySize(pageLines.flat());
+  const { figures, pageFigures } = await harvestFigures(doc, pagePlacements, geometries, warnings);
+  detectCaptions(pageLines, pageFigures, bodySize);
+
   const blocks: PdfBlock[] = [];
   for (let pageIndex = 0; pageIndex < pageLines.length; pageIndex += 1) {
     const regions = splitColumns(pageLines[pageIndex], geometries[pageIndex].width);
-    for (const region of regions) {
-      appendBlocks(blocks, buildBlocks(region, bodySize));
+    const assigned = assignFiguresToRegions(regions, pageFigures.get(pageIndex) || [], bodySize);
+    appendBlocks(blocks, assigned.leading);
+    for (let r = 0; r < regions.length; r += 1) {
+      appendBlocks(blocks, buildBlocks(regions[r], bodySize, assigned.perRegion[r]));
     }
   }
 
@@ -127,7 +147,7 @@ export async function extractPdfLayout(doc: PDFDocumentProxy): Promise<PdfLayout
     warnings.push("No selectable text was found. This PDF may be scanned or image-only.");
   }
 
-  return { blocks, outline, warnings };
+  return { blocks, outline, figures, warnings };
 }
 
 /* ------------------------------------------------------------------ */
@@ -264,25 +284,44 @@ function isFolio(text: string): boolean {
 /* ------------------------------------------------------------------ */
 
 /**
- * Detect a two-column layout by hunting for a vertical gutter that almost no
- * text CHUNK crosses. Chunks, not lines: baseline clustering merges left- and
- * right-column text at the same y into one line, so line extents always span
- * the gutter. Straddling lines are split into per-column lines; only chunks
- * that physically cross the gutter (spanning titles, abstracts) force a line
- * into the full-width region. Returns reading-ordered regions.
+ * Detect multi-column layouts by hunting for vertical gutters that almost no
+ * text CHUNK crosses, recursively: find the cleanest gutter, split, then try
+ * again inside each half (up to four columns — newspaper pages). Chunks, not
+ * lines: baseline clustering merges side-by-side column text at the same y
+ * into one line, so line extents always span the gutter. Straddling lines are
+ * split into per-column lines; only chunks that physically cross a gutter
+ * (spanning headlines, abstracts) force a line into that level's full-width
+ * region. Returns reading-ordered regions: spanning material first, then
+ * columns left to right.
  */
 export function splitColumns(lines: Line[], pageWidth: number): Line[][] {
+  return splitRegion(lines, 0, pageWidth, pageWidth, 0);
+}
+
+function splitRegion(
+  lines: Line[],
+  regionX0: number,
+  regionX1: number,
+  pageWidth: number,
+  depth: number
+): Line[][] {
+  if (depth >= 2) return [lines]; // two splits max → up to 4 columns
   if (lines.length < 8) return [lines];
+  const regionWidth = regionX1 - regionX0;
+  // Both halves must clear the minimum column width (0.18 × page).
+  if (regionWidth < pageWidth * 0.36) return [lines];
 
   const chunks = lines.flatMap((line) => line.chunks);
   if (chunks.length < 8) return [lines];
 
+  const minColumn = pageWidth * 0.18;
   const samples = 48;
   let bestX = -1;
   let bestCrossings = Number.POSITIVE_INFINITY;
 
   for (let step = 0; step <= samples; step += 1) {
-    const x = pageWidth * (0.32 + (0.36 * step) / samples);
+    const x = regionX0 + regionWidth * (0.3 + (0.4 * step) / samples);
+    if (x - regionX0 < minColumn || regionX1 - x < minColumn) continue;
     let crossings = 0;
     let left = 0;
     let right = 0;
@@ -301,23 +340,29 @@ export function splitColumns(lines: Line[], pageWidth: number): Line[][] {
   if (bestX < 0 || bestCrossings > chunks.length * 0.08) return [lines];
 
   // A page dominated by a wide table also exposes low-crossing gutters. Two
-  // tells separate real column layouts from tables: prose pages mass chunk
-  // starts at exactly two left margins, and both sides hold prose-length
-  // runs rather than clipped cells.
+  // tells separate real column layouts from tables, applied PER SIDE of the
+  // candidate gutter (a doc-wide "≥3 left margins" test would veto genuine
+  // 3+-column pages, whose margins are legitimate column starts): a side
+  // massing chunk starts at 3+ margins is a table, and both sides must hold
+  // prose-length runs rather than clipped cells. Two strong clusters on a
+  // side are legal — that side may itself be two columns; recursion decides.
   const tolerance = Math.max(pageWidth * 0.015, 8);
-  const starts = chunks.map((chunk) => chunk.x0).sort((a, b) => a - b);
-  const clusters: { x: number; count: number }[] = [];
-  for (const x of starts) {
-    const cluster = clusters[clusters.length - 1];
-    if (cluster && x - cluster.x <= tolerance) {
-      cluster.x = (cluster.x * cluster.count + x) / (cluster.count + 1);
-      cluster.count += 1;
-    } else {
-      clusters.push({ x, count: 1 });
+  const strongClustersOn = (side: (chunk: Chunk) => boolean): number => {
+    const starts = chunks.filter(side).map((chunk) => chunk.x0).sort((a, b) => a - b);
+    const clusters: { x: number; count: number }[] = [];
+    for (const x of starts) {
+      const cluster = clusters[clusters.length - 1];
+      if (cluster && x - cluster.x <= tolerance) {
+        cluster.x = (cluster.x * cluster.count + x) / (cluster.count + 1);
+        cluster.count += 1;
+      } else {
+        clusters.push({ x, count: 1 });
+      }
     }
-  }
-  const strongClusters = clusters.filter((cluster) => cluster.count >= Math.max(3, lines.length * 0.15));
-  if (strongClusters.length >= 3) return [lines];
+    return clusters.filter((cluster) => cluster.count >= Math.max(3, lines.length * 0.15)).length;
+  };
+  if (strongClustersOn((chunk) => chunk.x1 <= bestX) >= 3) return [lines];
+  if (strongClustersOn((chunk) => chunk.x0 >= bestX) >= 3) return [lines];
 
   const sideLengths = (side: (chunk: Chunk) => boolean): number => {
     const lengths = chunks.filter(side).map((chunk) => chunk.text.length).sort((a, b) => a - b);
@@ -347,9 +392,13 @@ export function splitColumns(lines: Line[], pageWidth: number): Line[][] {
     }
   }
 
-  // Full-width lines (titles, abstracts spanning both columns) read first,
-  // then the left column, then the right.
-  const regions = [full, left, right].filter((region) => region.length > 0);
+  // Spanning lines (headlines, abstracts) read first, then each column
+  // subtree left to right — each half may split again (3rd/4th column).
+  const regions = [
+    ...(full.length ? [full] : []),
+    ...splitRegion(left, regionX0, bestX, pageWidth, depth + 1),
+    ...splitRegion(right, bestX, regionX1, pageWidth, depth + 1)
+  ].filter((region) => region.length > 0);
   return regions.length > 1 ? regions : [lines];
 }
 
@@ -418,21 +467,503 @@ function dominantLeftMargin(lines: Line[]): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* Embedded figures                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where an image lands on its page, in two coordinate spaces: PDF user space
+ * (y-up, shared with Line.y — used for caption matching and reading order)
+ * and scale-1 viewport space (y-down — scales linearly with render scale, so
+ * crop rects are just multiplied). Images paint the CTM-mapped unit square.
+ */
+interface ImagePlacement {
+  objId: string | null;
+  ux0: number;
+  ux1: number;
+  /** User-space bottom edge (min y). */
+  uy0: number;
+  /** User-space top edge (max y). */
+  uy1: number;
+  dx0: number;
+  dy0: number;
+  dx1: number;
+  dy1: number;
+}
+
+/** A figure that survived filtering, positioned for caption/order passes. */
+interface PageFigure {
+  key: string;
+  page: number;
+  ux0: number;
+  ux1: number;
+  uy0: number;
+  uy1: number;
+  width: number;
+  height: number;
+  caption?: string;
+}
+
+interface RegionFigure {
+  /** Flush the figure block before this line index of its region. */
+  insertBefore: number;
+  block: PdfBlock;
+}
+
+const UNIT_CORNERS: [number, number][] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+const FIGURE_MAX_EDGE = 1600;
+const FIGURE_BYTE_BUDGET = 40 * 1024 * 1024;
+const FIGURE_COUNT_BUDGET = 250;
+
+/**
+ * Walk the page's operator list with a minimal graphics-state interpreter —
+ * save/restore/transform plus form-XObject nesting — to recover the CTM at
+ * every raster image paint. Deliberately ignored: image masks (decorative
+ * stencils painted in the fill colour), repeated placements (tiling by
+ * construction), transparency groups (wrapped in their own save/restore, so
+ * the CTM stays balanced).
+ */
+async function collectImagePlacements(
+  page: PDFPageProxy,
+  viewport: { transform: number[]; width: number; height: number }
+): Promise<ImagePlacement[]> {
+  let opList: { fnArray: number[]; argsArray: unknown[] };
+  try {
+    opList = await page.getOperatorList();
+  } catch {
+    return [];
+  }
+
+  const placements: ImagePlacement[] = [];
+  let ctm: number[] = [1, 0, 0, 1, 0, 0];
+  const stack: number[][] = [];
+
+  for (let i = 0; i < opList.fnArray.length; i += 1) {
+    const fn = opList.fnArray[i];
+    const args = opList.argsArray[i] as unknown[] | null;
+    switch (fn) {
+      case OPS.save:
+        stack.push(ctm);
+        break;
+      case OPS.restore:
+        ctm = stack.pop() ?? ctm;
+        break;
+      case OPS.transform:
+        ctm = Util.transform(ctm, args as number[]);
+        break;
+      case OPS.paintFormXObjectBegin:
+        // pdf.js emits this as an implicit save + matrix concat.
+        stack.push(ctm);
+        if (Array.isArray(args?.[0])) ctm = Util.transform(ctm, args[0] as number[]);
+        break;
+      case OPS.paintFormXObjectEnd:
+        ctm = stack.pop() ?? ctm;
+        break;
+      case OPS.paintImageXObject:
+        placements.push(placeUnitSquare(typeof args?.[0] === "string" ? args[0] : null, ctm, viewport));
+        break;
+      case OPS.paintInlineImageXObject:
+        placements.push(placeUnitSquare(null, ctm, viewport));
+        break;
+      default:
+        break;
+    }
+  }
+  return placements;
+}
+
+function placeUnitSquare(
+  objId: string | null,
+  ctm: number[],
+  viewport: { transform: number[] }
+): ImagePlacement {
+  const device = Util.transform(viewport.transform, ctm);
+  const user = UNIT_CORNERS.map((p) => Util.applyTransform([p[0], p[1]], ctm));
+  const dev = UNIT_CORNERS.map((p) => Util.applyTransform([p[0], p[1]], device));
+  return {
+    objId,
+    ux0: Math.min(...user.map((p) => p[0])),
+    ux1: Math.max(...user.map((p) => p[0])),
+    uy0: Math.min(...user.map((p) => p[1])),
+    uy1: Math.max(...user.map((p) => p[1])),
+    dx0: Math.min(...dev.map((p) => p[0])),
+    dy0: Math.min(...dev.map((p) => p[1])),
+    dx1: Math.max(...dev.map((p) => p[0])),
+    dy1: Math.max(...dev.map((p) => p[1]))
+  };
+}
+
+/**
+ * Filter placements down to real figures, render their pages once each, crop
+ * and encode the survivors, and dedup repeated artwork (logos, watermarks).
+ */
+async function harvestFigures(
+  doc: PDFDocumentProxy,
+  pagePlacements: ImagePlacement[][],
+  geometries: PageGeometry[],
+  warnings: string[]
+): Promise<{ figures: ExtractedFigure[]; pageFigures: Map<number, PageFigure[]> }> {
+  const pageCount = pagePlacements.length;
+
+  // Shared XObjects reused across pages resolve to the same object id — an
+  // id showing up on 3+ pages is chrome (logo, watermark), not content.
+  const objIdPages = new Map<string, Set<number>>();
+  pagePlacements.forEach((placements, pageIndex) => {
+    for (const placement of placements) {
+      if (!placement.objId) continue;
+      let pages = objIdPages.get(placement.objId);
+      if (!pages) objIdPages.set(placement.objId, (pages = new Set()));
+      pages.add(pageIndex);
+    }
+  });
+  // "Repeated" needs a floor of 3 pages — a bare percentage would call every
+  // image in a short document a logo.
+  const repeatThreshold = Math.max(3, Math.ceil(pageCount * 0.3));
+  const repeatedIds = new Set(
+    [...objIdPages.entries()]
+      .filter(([, pages]) => pages.size >= repeatThreshold)
+      .map(([objId]) => objId)
+  );
+
+  const kept: { placement: ImagePlacement; pageIndex: number }[] = [];
+  pagePlacements.forEach((placements, pageIndex) => {
+    const geometry = geometries[pageIndex];
+    const pageArea = geometry.width * geometry.height;
+    const candidates = placements
+      .map((placement) => clampPlacement(placement, geometry))
+      .filter((placement): placement is ImagePlacement => {
+        if (!placement) return false;
+        if (placement.objId && repeatedIds.has(placement.objId)) return false;
+        const w = placement.dx1 - placement.dx0;
+        const h = placement.dy1 - placement.dy0;
+        const area = w * h;
+        if (Math.min(w, h) < 32) return false;
+        if (area < pageArea * 0.015) return false;
+        if (area > pageArea * 0.85) return false;
+        return true;
+      })
+      .sort((a, b) => area(b) - area(a))
+      .slice(0, 4);
+    for (const placement of candidates) kept.push({ placement, pageIndex });
+  });
+
+  const figures: ExtractedFigure[] = [];
+  const pageFigures = new Map<number, PageFigure[]>();
+  const hashed: { hash: string; page: number; figureIndex: number }[] = [];
+  let totalBytes = 0;
+  let skipped = false;
+
+  const byPage = new Map<number, ImagePlacement[]>();
+  for (const { placement, pageIndex } of kept) {
+    const list = byPage.get(pageIndex);
+    if (list) list.push(placement);
+    else byPage.set(pageIndex, [placement]);
+  }
+
+  for (const [pageIndex, placements] of byPage) {
+    if (skipped) break;
+    let pageCanvas: HTMLCanvasElement | null = null;
+    let scale = 1;
+    try {
+      const page = await doc.getPage(pageIndex + 1);
+      const geometry = geometries[pageIndex];
+      const largestEdge = Math.max(...placements.map((p) => Math.max(p.dx1 - p.dx0, p.dy1 - p.dy0)));
+      scale = Math.min(
+        Math.max(1, FIGURE_MAX_EDGE / Math.max(largestEdge, 1)),
+        2.5,
+        4096 / Math.max(geometry.width, geometry.height)
+      );
+      const viewport = page.getViewport({ scale });
+      pageCanvas = document.createElement("canvas");
+      pageCanvas.width = Math.round(viewport.width);
+      pageCanvas.height = Math.round(viewport.height);
+      const context = pageCanvas.getContext("2d");
+      if (!context) continue;
+      await page.render({ canvasContext: context, viewport }).promise;
+      page.cleanup();
+    } catch {
+      continue;
+    }
+
+    let n = 0;
+    for (const placement of placements) {
+      if (figures.length >= FIGURE_COUNT_BUDGET || totalBytes >= FIGURE_BYTE_BUDGET) {
+        skipped = true;
+        break;
+      }
+      const sx = placement.dx0 * scale;
+      const sy = placement.dy0 * scale;
+      const sw = (placement.dx1 - placement.dx0) * scale;
+      const sh = (placement.dy1 - placement.dy0) * scale;
+      const shrink = Math.min(1, FIGURE_MAX_EDGE / Math.max(sw, sh));
+      const dw = Math.max(1, Math.round(sw * shrink));
+      const dh = Math.max(1, Math.round(sh * shrink));
+
+      const crop = document.createElement("canvas");
+      crop.width = dw;
+      crop.height = dh;
+      const cropContext = crop.getContext("2d");
+      if (!cropContext) continue;
+      cropContext.drawImage(pageCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+
+      const blob = await canvasToBlob(crop, 0.85);
+      if (!blob) continue;
+      totalBytes += blob.size;
+
+      const key = `fig:${pageIndex}:${n}`;
+      n += 1;
+      hashed.push({ hash: averageHash(cropContext, dw, dh), page: pageIndex, figureIndex: figures.length });
+      figures.push({ key, page: pageIndex, blob, width: dw, height: dh });
+
+      const list = pageFigures.get(pageIndex) || [];
+      list.push({
+        key,
+        page: pageIndex,
+        ux0: placement.ux0,
+        ux1: placement.ux1,
+        uy0: placement.uy0,
+        uy1: placement.uy1,
+        width: dw,
+        height: dh
+      });
+      pageFigures.set(pageIndex, list);
+    }
+    pageCanvas.width = 0;
+    pageCanvas.height = 0;
+  }
+
+  // Tier-2 dedup: visually identical crops on 3+ pages are decorations that
+  // slipped past objId sharing (regenerated per page by some producers).
+  const hashPages = new Map<string, Set<number>>();
+  for (const entry of hashed) {
+    let pages = hashPages.get(entry.hash);
+    if (!pages) hashPages.set(entry.hash, (pages = new Set()));
+    pages.add(entry.page);
+  }
+  const dropKeys = new Set<string>();
+  for (const entry of hashed) {
+    if ((hashPages.get(entry.hash)?.size ?? 0) >= 3) dropKeys.add(figures[entry.figureIndex].key);
+  }
+  const keptFigures = figures.filter((figure) => !dropKeys.has(figure.key));
+  if (dropKeys.size) {
+    for (const [pageIndex, list] of pageFigures) {
+      pageFigures.set(pageIndex, list.filter((figure) => !dropKeys.has(figure.key)));
+    }
+  }
+
+  if (skipped) {
+    warnings.push("Some figures were skipped to keep this book compact.");
+  }
+  return { figures: keptFigures, pageFigures };
+}
+
+function clampPlacement(placement: ImagePlacement, geometry: PageGeometry): ImagePlacement | null {
+  const rawArea = area(placement);
+  if (rawArea <= 0) return null;
+  const clamped: ImagePlacement = {
+    ...placement,
+    dx0: Math.max(0, placement.dx0),
+    dy0: Math.max(0, placement.dy0),
+    dx1: Math.min(geometry.width, placement.dx1),
+    dy1: Math.min(geometry.height, placement.dy1)
+  };
+  if (clamped.dx1 <= clamped.dx0 || clamped.dy1 <= clamped.dy0) return null;
+  // Mostly off-page placements are bleed art, not content.
+  if (area(clamped) < rawArea * 0.6) return null;
+  return clamped;
+}
+
+function area(placement: ImagePlacement): number {
+  return Math.max(0, placement.dx1 - placement.dx0) * Math.max(0, placement.dy1 - placement.dy0);
+}
+
+/** 256-bit mean-threshold hash of the crop, for cross-page duplicate detection. */
+function averageHash(context: CanvasRenderingContext2D, width: number, height: number): string {
+  const tiny = document.createElement("canvas");
+  tiny.width = 16;
+  tiny.height = 16;
+  const tinyContext = tiny.getContext("2d");
+  if (!tinyContext) return Math.random().toString(36);
+  tinyContext.drawImage(context.canvas, 0, 0, width, height, 0, 0, 16, 16);
+  const data = tinyContext.getImageData(0, 0, 16, 16).data;
+  const gray: number[] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    gray.push(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+  const mean = gray.reduce((sum, value) => sum + value, 0) / gray.length;
+  let hash = "";
+  for (let i = 0; i < gray.length; i += 4) {
+    let nibble = 0;
+    for (let bit = 0; bit < 4; bit += 1) {
+      nibble = (nibble << 1) | (gray[i + bit] > mean ? 1 : 0);
+    }
+    hash += nibble.toString(16);
+  }
+  return hash;
+}
+
+const CAPTION_PATTERN = /^(fig(ure)?\.?|plate|chart|exhibit|illustration)\s*\d/i;
+
+/**
+ * Pair figures with nearby caption lines (small type or "Figure N …" starts,
+ * directly below — or above as a fallback — and horizontally aligned).
+ * Consumed lines leave the text flow so they don't double as paragraphs.
+ */
+function detectCaptions(
+  pageLines: Line[][],
+  pageFigures: Map<number, PageFigure[]>,
+  bodySize: number
+): void {
+  for (const [pageIndex, figuresOnPage] of pageFigures) {
+    let lines = pageLines[pageIndex];
+    for (const figure of figuresOnPage) {
+      const figWidth = figure.ux1 - figure.ux0;
+      const overlaps = (line: Line) =>
+        Math.min(line.x1, figure.ux1) - Math.max(line.x0, figure.ux0) >= figWidth * 0.5;
+      const looksCaption = (line: Line) =>
+        CAPTION_PATTERN.test(line.text) || line.size <= bodySize * 0.92;
+
+      let start = -1;
+      let below = true;
+      let bestGap = Number.POSITIVE_INFINITY;
+      lines.forEach((line, index) => {
+        if (!overlaps(line) || !looksCaption(line)) return;
+        const gapBelow = figure.uy0 - line.y;
+        if (gapBelow > 0 && gapBelow <= bodySize * 2.5 + line.size && gapBelow < bestGap) {
+          start = index;
+          below = true;
+          bestGap = gapBelow;
+        }
+      });
+      if (start < 0) {
+        lines.forEach((line, index) => {
+          if (!overlaps(line) || !looksCaption(line)) return;
+          const gapAbove = line.y - figure.uy1;
+          if (gapAbove > 0 && gapAbove <= bodySize * 2.5 && gapAbove < bestGap) {
+            start = index;
+            below = false;
+            bestGap = gapAbove;
+          }
+        });
+      }
+      if (start < 0) continue;
+
+      const first = lines[start];
+      const captionLines = [first];
+      let end = start + 1;
+      let totalLength = first.text.length;
+      while (
+        end < lines.length &&
+        captionLines.length < 3 &&
+        Math.abs(lines[end].size - first.size) < 0.6 &&
+        lines[end - 1].y - lines[end].y < first.size * 1.6 &&
+        totalLength + lines[end].text.length <= 300 &&
+        (below || lines[end].y > figure.uy1)
+      ) {
+        captionLines.push(lines[end]);
+        totalLength += lines[end].text.length;
+        end += 1;
+      }
+
+      figure.caption = captionLines
+        .map((line) => line.text)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      lines = lines.filter((_, index) => index < start || index >= end);
+    }
+    pageLines[pageIndex] = lines;
+  }
+}
+
+/**
+ * Slot each figure into the column region it visually belongs to, precomputing
+ * the line index it should flush before. Figures spanning multiple columns
+ * (or matching none) read first, like spanning headlines.
+ */
+function assignFiguresToRegions(
+  regions: Line[][],
+  figuresOnPage: PageFigure[],
+  bodySize: number
+): { perRegion: RegionFigure[][]; leading: PdfBlock[] } {
+  const perRegion: RegionFigure[][] = regions.map(() => []);
+  const leading: PdfBlock[] = [];
+
+  for (const figure of figuresOnPage) {
+    const block: PdfBlock = {
+      block: {
+        kind: "figure",
+        text: figure.caption || `[Figure — page ${figure.page + 1}]`,
+        imageId: figure.key,
+        width: figure.width,
+        height: figure.height,
+        ...(figure.caption ? { caption: figure.caption } : {})
+      },
+      page: figure.page,
+      size: bodySize
+    };
+
+    if (regions.length === 1) {
+      perRegion[0].push({ insertBefore: insertionIndex(regions[0], figure), block });
+      continue;
+    }
+
+    const figWidth = figure.ux1 - figure.ux0;
+    const matching: number[] = [];
+    regions.forEach((region, index) => {
+      if (!region.length) return;
+      const rx0 = Math.min(...region.map((line) => line.x0));
+      const rx1 = Math.max(...region.map((line) => line.x1));
+      const overlap = Math.min(rx1, figure.ux1) - Math.max(rx0, figure.ux0);
+      if (overlap >= figWidth * 0.4) matching.push(index);
+    });
+
+    if (matching.length === 1) {
+      const index = matching[0];
+      perRegion[index].push({ insertBefore: insertionIndex(regions[index], figure), block });
+    } else {
+      leading.push(block);
+    }
+  }
+
+  for (const list of perRegion) list.sort((a, b) => a.insertBefore - b.insertBefore);
+  return { perRegion, leading };
+}
+
+/** First line of the region that sits below the figure (lines are y-descending). */
+function insertionIndex(region: Line[], figure: PageFigure): number {
+  for (let index = 0; index < region.length; index += 1) {
+    if (region[index].y < figure.uy0) return index;
+  }
+  return region.length;
+}
+
+/* ------------------------------------------------------------------ */
 /* Lines → blocks                                                      */
 /* ------------------------------------------------------------------ */
 
 const TERMINAL_PUNCTUATION = /[.!?:;'"’”)\]]$/;
 const LIST_MARKER = /^([•▪◦‣∙·*]|\(?\d{1,3}[.)]|\(?[a-z][.)])\s+(\S.*)$/i;
 
-export function buildBlocks(lines: Line[], bodySize: number): PdfBlock[] {
-  if (!lines.length) return [];
+export function buildBlocks(lines: Line[], bodySize: number, figures: RegionFigure[] = []): PdfBlock[] {
+  if (!lines.length) return figures.map((figure) => figure.block);
   const gap = medianLineGap(lines, bodySize);
   const margin = dominantLeftMargin(lines);
   const rightEdge = Math.max(...lines.map((line) => line.x1));
   const blocks: PdfBlock[] = [];
 
+  // Figures flush at block boundaries once the scan reaches their position —
+  // they sit between paragraphs vertically, never inside a line run.
+  let figureCursor = 0;
+  const flushFigures = (uptoLine: number) => {
+    while (figureCursor < figures.length && figures[figureCursor].insertBefore <= uptoLine) {
+      blocks.push(figures[figureCursor].block);
+      figureCursor += 1;
+    }
+  };
+
   let index = 0;
   while (index < lines.length) {
+    flushFigures(index);
     const table = tryTable(lines, index, bodySize, gap);
     if (table) {
       blocks.push(table.block);
@@ -518,6 +1049,7 @@ export function buildBlocks(lines: Line[], bodySize: number): PdfBlock[] {
     index = cursor;
   }
 
+  flushFigures(lines.length);
   return blocks;
 }
 

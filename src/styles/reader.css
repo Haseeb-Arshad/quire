@@ -11,10 +11,6 @@
   background: var(--bg);
 }
 
-.reader-shell[data-rail="open"] {
-  grid-template-columns: minmax(0, 1fr) 300px;
-}
-
 /* --------------------------- Top bar ------------------------------ */
 
 .top-bar {
@@ -315,6 +311,64 @@
   font-style: italic;
 }
 
+/* Figures — embedded images extracted from the source pages */
+.book-figure {
+  margin: 1.9em auto;
+  max-width: 100%;
+  text-align: center;
+}
+
+.figure-frame {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid var(--reader-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--reader-ink) 3%, transparent);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.figure-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.book-figure figcaption {
+  margin-top: 0.7em;
+  font-family: var(--reader-font-family, var(--font-serif));
+  font-size: calc(var(--reader-font-size, 19px) * 0.82);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.figure-caption {
+  color: color-mix(in srgb, var(--reader-ink) 72%, transparent);
+}
+
+.figure-plate-label {
+  color: color-mix(in srgb, var(--reader-ink) 45%, transparent);
+  font-style: italic;
+}
+
+.figure-lightbox-img {
+  max-width: min(96vw, 1600px);
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.note-page {
+  color: var(--text-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .code-block {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: calc(var(--reader-font-size, 19px) * 0.78);
@@ -442,6 +496,129 @@ button.hl-dot:hover {
   cursor: default;
 }
 
+/* Chapter footer nav (paged flow) */
+.chapter-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--reader-border);
+}
+
+.chapter-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 40%;
+  padding: 8px 14px;
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--reader-ink);
+  font-family: var(--reader-font-family, var(--font-serif));
+  font-size: calc(var(--reader-font-size, 19px) * 0.78);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.chapter-step span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-step:hover {
+  background: color-mix(in srgb, var(--reader-ink) 6%, transparent);
+  border-color: color-mix(in srgb, var(--reader-ink) 28%, transparent);
+}
+
+.chapter-footer-count {
+  color: color-mix(in srgb, var(--reader-ink) 50%, transparent);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Notes: inline note editor */
+.note-item-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.note-text,
+.note-add {
+  margin: 0 0 6px 30px;
+  padding: 4px 8px;
+  border: none;
+  border-left: 2px solid var(--border-hover);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-default);
+}
+
+.note-add {
+  color: var(--text-subtle);
+  font-style: italic;
+}
+
+.note-text:hover,
+.note-add:hover {
+  background: var(--fill-hover);
+}
+
+.note-editor {
+  margin: 0 0 8px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.note-editor textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-default);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.note-editor textarea:focus {
+  outline: none;
+  border-color: var(--border-active);
+}
+
+.note-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.note-editor-save,
+.note-editor-cancel {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  font-size: 11px;
+  color: var(--text-default);
+}
+
+.note-editor-save:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.note-editor-cancel:hover {
+  background: var(--fill-hover);
+}
+
 /* Rail: header + tabs */
 .rail-top {
   display: flex;
@@ -462,16 +639,20 @@ button.hl-dot:hover {
   height: 16px;
 }
 
-section:has(> .rail-top) .segmented {
+.edge-drawer > .segmented {
   display: flex;
   width: 100%;
 }
 
-section:has(> .rail-top) .segmented button {
+.edge-drawer > .segmented button {
   flex: 1;
   text-align: center;
   padding: 5px 6px;
   font-size: 12px;
+}
+
+.rail-appearance .secondary-action {
+  margin-top: 4px;
 }
 
 /* Rail: notes tab */
@@ -608,16 +789,100 @@ section:has(> .rail-top) .segmented button {
   color: var(--text-strong);
 }
 
-/* --------------------------- Outline rail ------------------------- */
+/* --------------------- Edge drawers + toggles --------------------- */
 
-.outline-panel {
-  border-left: 1px solid var(--border);
-  background: var(--bg-panel);
+.edge-drawer {
+  position: fixed;
+  top: 56px;
+  bottom: 0;
+  z-index: 45;
+  width: min(320px, 88vw);
   overflow-y: auto;
-  padding: 20px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 18px 16px 24px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: drawer-in 0.22s ease;
+}
+
+.edge-drawer-left {
+  left: 0;
+  border-right: 1px solid var(--border);
+  --drawer-from: -24px;
+}
+
+.edge-drawer-right {
+  right: 0;
+  border-left: 1px solid var(--border);
+  --drawer-from: 24px;
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--drawer-from, 0));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Small, softly blurred arrow pills hugging the screen edges. */
+.edge-toggle {
+  position: fixed;
+  top: 50%;
+  z-index: 46;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-subtle);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.edge-toggle:hover {
+  opacity: 1;
+  color: var(--text-strong);
+  background: var(--bg-elevated);
+}
+
+.edge-toggle-left {
+  left: 0;
+  transform: translateY(-50%);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+}
+
+.edge-toggle-right {
+  right: 0;
+  transform: translateY(-50%);
+  border-right: none;
+  border-radius: 999px 0 0 999px;
+}
+
+.edge-toggle.open svg {
+  transform: rotate(180deg);
+}
+
+.edge-toggle svg {
+  transition: transform 0.2s ease;
+}
+
+/* Keep the toggles clear of their open drawers. */
+.edge-toggle-left.open {
+  left: min(320px, 88vw);
+}
+
+.edge-toggle-right.open {
+  right: min(320px, 88vw);
 }
 
 .section-heading {
@@ -967,13 +1232,8 @@ section:has(> .rail-top) .segmented button {
 /* --------------------------- Responsive --------------------------- */
 
 @media (max-width: 1120px) {
-  .reader-shell,
-  .reader-shell[data-rail="open"] {
+  .reader-shell {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .outline-panel {
-    display: none;
   }
 }
 
@@ -999,7 +1259,9 @@ section:has(> .rail-top) .segmented button {
 
 @media print {
   .top-bar,
-  .outline-panel {
+  .edge-drawer,
+  .edge-toggle,
+  .chapter-footer {
     display: none;
   }
 

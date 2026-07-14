@@ -3,7 +3,7 @@
 // stay familiar.
 
 import type { BookDocument, BookSummary } from "./types";
-import { getDb, type Database } from "./db";
+import { getDb, type Database, type StoredImage } from "./db";
 import { extractFromFile } from "./extraction";
 import { STRUCTURE_VERSION } from "./extraction/structure";
 import { removeBookPrefs } from "./preferences";
@@ -39,14 +39,17 @@ async function restructureBook(db: Database, summary: BookSummary): Promise<Book
     const file = new File([stored.blob], stored.name || summary.fileName, {
       type: stored.type || "application/pdf"
     });
-    const { book, cover } = await extractFromFile(file, summary.id, summary.uploadedAt);
+    const { book, cover, images } = await extractFromFile(file, summary.id, summary.uploadedAt);
     // Preserve a user-chosen title over the re-inferred one.
     const kept: BookDocument = { ...book, title: summary.title || book.title };
-    const tx = db.transaction(["books", "contents", "covers"], "readwrite");
+    const staleImageKeys = await db.getAllKeysFromIndex("images", "by-bookId", summary.id);
+    const tx = db.transaction(["books", "contents", "covers", "images"], "readwrite");
     await Promise.all([
       tx.objectStore("books").put(summarize(kept)),
       tx.objectStore("contents").put({ id: kept.id, sections: kept.sections, rawSample: kept.rawSample }),
-      cover ? tx.objectStore("covers").put({ id: kept.id, blob: cover }) : Promise.resolve(undefined)
+      cover ? tx.objectStore("covers").put({ id: kept.id, blob: cover }) : Promise.resolve(undefined),
+      ...staleImageKeys.map((key) => tx.objectStore("images").delete(key)),
+      ...(images || []).map((image) => tx.objectStore("images").put(image))
     ]);
     await tx.done;
     return kept;
@@ -59,10 +62,10 @@ async function restructureBook(db: Database, summary: BookSummary): Promise<Book
 export async function importBook(file: File): Promise<BookDocument> {
   const id = crypto.randomUUID();
   const uploadedAt = new Date().toISOString();
-  const { book, original, cover } = await extractFromFile(file, id, uploadedAt);
+  const { book, original, cover, images } = await extractFromFile(file, id, uploadedAt);
 
   const db = await getDb();
-  const tx = db.transaction(["books", "contents", "files", "covers"], "readwrite");
+  const tx = db.transaction(["books", "contents", "files", "covers", "images"], "readwrite");
   const summary = summarize(book);
   await Promise.all([
     tx.objectStore("books").put(summary),
@@ -70,7 +73,8 @@ export async function importBook(file: File): Promise<BookDocument> {
     original
       ? tx.objectStore("files").put({ id, name: file.name, type: file.type || "application/pdf", blob: original })
       : Promise.resolve(undefined),
-    cover ? tx.objectStore("covers").put({ id, blob: cover }) : Promise.resolve(undefined)
+    cover ? tx.objectStore("covers").put({ id, blob: cover }) : Promise.resolve(undefined),
+    ...(images || []).map((image) => tx.objectStore("images").put(image))
   ]);
   await tx.done;
   return book;
@@ -78,14 +82,18 @@ export async function importBook(file: File): Promise<BookDocument> {
 
 export async function deleteBook(id: string): Promise<void> {
   const db = await getDb();
-  const annotationKeys = await db.getAllKeysFromIndex("annotations", "by-bookId", id);
-  const tx = db.transaction(["books", "contents", "files", "covers", "annotations"], "readwrite");
+  const [annotationKeys, imageKeys] = await Promise.all([
+    db.getAllKeysFromIndex("annotations", "by-bookId", id),
+    db.getAllKeysFromIndex("images", "by-bookId", id)
+  ]);
+  const tx = db.transaction(["books", "contents", "files", "covers", "annotations", "images"], "readwrite");
   await Promise.all([
     tx.objectStore("books").delete(id),
     tx.objectStore("contents").delete(id),
     tx.objectStore("files").delete(id),
     tx.objectStore("covers").delete(id),
-    ...annotationKeys.map((key) => tx.objectStore("annotations").delete(key))
+    ...annotationKeys.map((key) => tx.objectStore("annotations").delete(key)),
+    ...imageKeys.map((key) => tx.objectStore("images").delete(key))
   ]);
   await tx.done;
   removeStats(id);
@@ -109,6 +117,11 @@ export async function getCoverBlob(id: string): Promise<Blob | undefined> {
   const db = await getDb();
   const stored = await db.get("covers", id);
   return stored?.blob;
+}
+
+export async function getImage(id: string): Promise<StoredImage | undefined> {
+  const db = await getDb();
+  return db.get("images", id);
 }
 
 export async function createDemoBook(): Promise<BookDocument> {

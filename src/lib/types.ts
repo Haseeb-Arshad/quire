@@ -14,7 +14,9 @@ export type ContentBlock =
   | { kind: "list-item"; text: string; marker: string }
   | { kind: "code"; text: string }
   | { kind: "quote"; text: string }
-  | { kind: "table"; text: string; rows: string[][]; headerRow: boolean };
+  | { kind: "table"; text: string; rows: string[][]; headerRow: boolean }
+  /** Embedded image cropped from the source page; `text` is the detected caption, or a deterministic placeholder. Binary lives in the `images` store under imageId. */
+  | { kind: "figure"; text: string; imageId: string; width: number; height: number; caption?: string };
 
 export interface BookSection {
   id: string;
@@ -79,4 +81,26 @@ export interface Bookmark {
   createdAt: number;
 }
 
-export type Annotation = Highlight | Bookmark;
+/** Highlight on the original-PDF pages view. Rects are fractions of the page box ([x, y, w, h]) so they survive zoom, resize and DPR changes. */
+export interface PageHighlight {
+  kind: "page-highlight";
+  id: string;
+  bookId: string;
+  page: number;
+  rects: [number, number, number, number][];
+  quote: string;
+  color: HighlightColor;
+  note?: string;
+  createdAt: number;
+}
+
+export interface PageBookmark {
+  kind: "page-bookmark";
+  id: string;
+  bookId: string;
+  page: number;
+  label: string;
+  createdAt: number;
+}
+
+export type Annotation = Highlight | Bookmark | PageHighlight | PageBookmark;

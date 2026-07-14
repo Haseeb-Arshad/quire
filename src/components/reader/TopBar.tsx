@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Layers, Moon, PanelRight, Sun } from "lucide-react";
+import { ArrowLeft, Layers, Moon, Sun } from "lucide-react";
 import type { ViewMode } from "../../lib/preferences";
 import { Segmented } from "../ui/Segmented";
 import { SearchBar } from "./SearchBar";
@@ -14,8 +14,6 @@ export function TopBar(props: {
   progress: number;
   onViewMode: (value: ViewMode) => void;
   onOpenChapters: () => void;
-  railOpen: boolean;
-  onToggleRail: () => void;
   query: string;
   onQuery: (value: string) => void;
   matchCount: number;
@@ -77,16 +75,6 @@ export function TopBar(props: {
           title={appTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
           {appTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-
-        <button
-          className={"icon-button" + (props.railOpen ? " active" : "")}
-          type="button"
-          onClick={props.onToggleRail}
-          title={props.railOpen ? "Collapse sidebar" : "Show outline & appearance"}
-          aria-pressed={props.railOpen}
-        >
-          <PanelRight size={16} />
         </button>
       </div>
 

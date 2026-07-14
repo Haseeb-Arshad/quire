@@ -1,11 +1,16 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { BookOpen, Files, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Files, Loader2 } from "lucide-react";
 import type { Annotation, BookDocument, HighlightColor } from "../../lib/types";
-import type { PageTheme, ViewMode, WidthMode } from "../../lib/preferences";
+import type { FlowMode, PageTheme, ViewMode, WidthMode } from "../../lib/preferences";
 import { fontStack } from "../../lib/fonts";
 import { getFileBlob } from "../../lib/library";
 import { useBlobUrl } from "../../lib/hooks";
-import { selectionToDrafts, type Decoration, type SelectionDraft } from "../../lib/anchors";
+import {
+  selectionToDrafts,
+  type Decoration,
+  type PageSelectionDraft,
+  type SelectionDraft
+} from "../../lib/anchors";
 import { resolveHighlightRange } from "../../lib/annotations";
 import type { SearchMatch } from "../../lib/search";
 import { EMPTY_DECORATIONS, Paragraph } from "./Paragraph";
@@ -24,10 +29,20 @@ export function ReaderCanvas(props: {
   widthMode: WidthMode;
   viewMode: ViewMode;
   pageTheme: PageTheme;
+  flowMode: FlowMode;
+  /** Chapter shown in paged mode; -1 is the cover page. */
+  activeChapterIndex: number;
+  onChapterSelect: (index: number) => void;
   searchMatches: SearchMatch[];
   activeMatchIndex: number;
   annotations: Annotation[];
   onHighlight: (drafts: SelectionDraft[], color: HighlightColor) => void;
+  onPageHighlight: (drafts: PageSelectionDraft[], color: HighlightColor) => void;
+  onDeleteAnnotation: (id: string) => void;
+  onSaveNote: (id: string, note: string) => void;
+  onVisiblePage: (page: number) => void;
+  initialPage?: number;
+  pdfJump?: { page: number; nonce: number } | null;
 }) {
   const fileUrl = useBlobUrl(
     props.book?.id,
@@ -79,7 +94,9 @@ export function ReaderCanvas(props: {
     return map;
   }, [props.book, props.annotations, props.searchMatches, props.activeMatchIndex]);
 
-  // Bring the active search match to the center of the stage.
+  // Bring the active search match to the center of the stage. In paged mode
+  // the chapter may have just switched, so the chapter index is a dependency —
+  // the mark only exists once the right chapter has rendered.
   useEffect(() => {
     if (!props.searchMatches.length) return;
     const stage = props.stageRef.current;
@@ -88,7 +105,7 @@ export function ReaderCanvas(props: {
       stage.querySelector(".deco-search-active")?.scrollIntoView({ block: "center" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [props.activeMatchIndex, props.searchMatches, props.stageRef]);
+  }, [props.activeMatchIndex, props.searchMatches, props.stageRef, props.activeChapterIndex]);
 
   const handleMouseUp = () => {
     const stage = props.stageRef.current;
@@ -109,7 +126,11 @@ export function ReaderCanvas(props: {
     setPopover(null);
   };
 
-  const scrollToContent = () => {
+  const beginReading = () => {
+    if (props.flowMode === "paged") {
+      props.onChapterSelect(0);
+      return;
+    }
     props.stageRef.current
       ?.querySelector(".book-section")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -156,7 +177,18 @@ export function ReaderCanvas(props: {
                 </div>
               }
             >
-              <PdfPageView bookId={props.book.id} fileUrl={fileUrl} pageTheme={props.pageTheme} />
+              <PdfPageView
+                bookId={props.book.id}
+                fileUrl={fileUrl}
+                pageTheme={props.pageTheme}
+                annotations={props.annotations}
+                onPageHighlight={props.onPageHighlight}
+                onDeleteAnnotation={props.onDeleteAnnotation}
+                onSaveNote={props.onSaveNote}
+                onVisiblePage={props.onVisiblePage}
+                initialPage={props.initialPage}
+                jump={props.pdfJump}
+              />
             </Suspense>
           ) : (
             <div className="pdf-state">
@@ -168,6 +200,28 @@ export function ReaderCanvas(props: {
       </section>
     );
   }
+
+  const paged = props.flowMode === "paged";
+  const chapterCount = props.book.sections.length;
+  const chapterIndex = Math.min(props.activeChapterIndex, chapterCount - 1);
+  const activeSection = paged && chapterIndex >= 0 ? props.book.sections[chapterIndex] : null;
+  const showCover = !paged || chapterIndex < 0;
+
+  const renderSection = (section: BookDocument["sections"][number]) => (
+    <section key={section.id} id={section.id} className="book-section">
+      <h2>{section.title}</h2>
+      {section.paragraphs.map((paragraph, index) => (
+        <Paragraph
+          key={`${section.id}-${index}`}
+          text={paragraph}
+          block={section.blocks?.[index]}
+          sectionId={section.id}
+          paraIndex={index}
+          decorations={decoMap.get(`${section.id}|${index}`) || EMPTY_DECORATIONS}
+        />
+      ))}
+    </section>
+  );
 
   return (
     <section
@@ -186,29 +240,29 @@ export function ReaderCanvas(props: {
           } as React.CSSProperties
         }
       >
-        <section className="book-cover">
-          {props.book.author ? <p className="book-cover-author">{props.book.author}</p> : null}
-          <h1 className="book-cover-title">{props.book.title}</h1>
-          <button type="button" className="book-cover-begin" onClick={scrollToContent}>
-            begin
-          </button>
-        </section>
-
-        {props.book.sections.map((section) => (
-          <section key={section.id} id={section.id} className="book-section">
-            <h2>{section.title}</h2>
-            {section.paragraphs.map((paragraph, index) => (
-              <Paragraph
-                key={`${section.id}-${index}`}
-                text={paragraph}
-                block={section.blocks?.[index]}
-                sectionId={section.id}
-                paraIndex={index}
-                decorations={decoMap.get(`${section.id}|${index}`) || EMPTY_DECORATIONS}
-              />
-            ))}
+        {showCover ? (
+          <section className="book-cover">
+            {props.book.author ? <p className="book-cover-author">{props.book.author}</p> : null}
+            <h1 className="book-cover-title">{props.book.title}</h1>
+            <button type="button" className="book-cover-begin" onClick={beginReading}>
+              begin
+            </button>
           </section>
-        ))}
+        ) : null}
+
+        {paged
+          ? activeSection
+            ? renderSection(activeSection)
+            : null
+          : props.book.sections.map(renderSection)}
+
+        {paged ? (
+          <ChapterFooter
+            book={props.book}
+            chapterIndex={chapterIndex}
+            onChapterSelect={props.onChapterSelect}
+          />
+        ) : null}
       </article>
 
       {popover ? (
@@ -227,4 +281,56 @@ export function ReaderCanvas(props: {
       ) : null}
     </section>
   );
+}
+
+function ChapterFooter({
+  book,
+  chapterIndex,
+  onChapterSelect
+}: {
+  book: BookDocument;
+  chapterIndex: number;
+  onChapterSelect: (index: number) => void;
+}) {
+  const count = book.sections.length;
+  const prevTitle = chapterIndex === 0 ? "Cover" : book.sections[chapterIndex - 1]?.title;
+  const next = book.sections[chapterIndex + 1];
+
+  return (
+    <nav className="chapter-footer" aria-label="Chapter navigation">
+      {chapterIndex >= 0 ? (
+        <button
+          type="button"
+          className="chapter-step"
+          onClick={() => onChapterSelect(chapterIndex - 1)}
+        >
+          <ArrowLeft size={14} />
+          <span>{truncateTitle(prevTitle || "Previous")}</span>
+        </button>
+      ) : (
+        <span />
+      )}
+
+      <span className="chapter-footer-count">
+        {chapterIndex >= 0 ? `Chapter ${chapterIndex + 1} of ${count}` : `${count} chapters`}
+      </span>
+
+      {chapterIndex < count - 1 ? (
+        <button
+          type="button"
+          className="chapter-step chapter-step-next"
+          onClick={() => onChapterSelect(chapterIndex + 1)}
+        >
+          <span>{truncateTitle(chapterIndex < 0 ? book.sections[0]?.title || "Begin" : next?.title || "Next")}</span>
+          <ArrowRight size={14} />
+        </button>
+      ) : (
+        <span />
+      )}
+    </nav>
+  );
+}
+
+function truncateTitle(value: string): string {
+  return value.length > 34 ? `${value.slice(0, 33)}…` : value;
 }
